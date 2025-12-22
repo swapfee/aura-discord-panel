@@ -5,12 +5,14 @@ const ALLOWED_ORIGINS = [
   'https://jamwzfymmrqvdeoptlid.lovable.app',
 ];
 
-// Check if origin is allowed (includes lovableproject.com preview domains)
+// Check if origin is allowed (includes lovableproject.com preview domains and lovable.app domains)
 function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   // Allow preview domains (*.lovableproject.com)
   if (origin.endsWith('.lovableproject.com')) return true;
+  // Allow any lovable.app subdomain
+  if (origin.endsWith('.lovable.app')) return true;
   return false;
 }
 

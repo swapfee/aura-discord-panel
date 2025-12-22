@@ -10,6 +10,9 @@ const DISCORD_CLIENT_SECRET = Deno.env.get('DISCORD_CLIENT_SECRET')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+// Hardcoded redirect URI - must match exactly what's registered in Discord Developer Portal
+const REDIRECT_URI = 'https://jamwzfymmrqvdeoptlid.lovable.app/auth/callback';
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -20,17 +23,14 @@ serve(async (req) => {
     const action = url.searchParams.get('action');
 
     if (action === 'login') {
-      // Get the origin from the request headers or use a fallback
-      const origin = req.headers.get('origin') || req.headers.get('referer')?.replace(/\/$/, '') || '';
-      const redirectUri = `${origin}/auth/callback`;
       const state = crypto.randomUUID();
       
       const discordAuthUrl = new URL('https://discord.com/api/oauth2/authorize');
       discordAuthUrl.searchParams.set('client_id', DISCORD_CLIENT_ID);
-      discordAuthUrl.searchParams.set('redirect_uri', redirectUri);
+      discordAuthUrl.searchParams.set('redirect_uri', REDIRECT_URI);
       discordAuthUrl.searchParams.set('response_type', 'code');
       discordAuthUrl.searchParams.set('scope', 'identify guilds');
-      discordAuthUrl.searchParams.set('state', `${state}|${encodeURIComponent(redirectUri)}`);
+      discordAuthUrl.searchParams.set('state', state);
 
       return new Response(JSON.stringify({ url: discordAuthUrl.toString(), state }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -39,7 +39,6 @@ serve(async (req) => {
 
     if (action === 'callback') {
       const code = url.searchParams.get('code');
-      const stateParam = url.searchParams.get('state');
       
       if (!code) {
         return new Response(JSON.stringify({ error: 'No code provided' }), {
@@ -48,20 +47,7 @@ serve(async (req) => {
         });
       }
 
-      // Extract redirect URI from state
-      let redirectUri = '';
-      if (stateParam && stateParam.includes('|')) {
-        const parts = stateParam.split('|');
-        redirectUri = decodeURIComponent(parts[1] || '');
-      }
-      
-      if (!redirectUri) {
-        // Fallback - get from referer or origin header
-        const origin = req.headers.get('origin') || req.headers.get('referer')?.replace(/\/$/, '').replace(/\/auth\/callback.*$/, '') || '';
-        redirectUri = `${origin}/auth/callback`;
-      }
-
-      // Exchange code for tokens
+      // Exchange code for tokens using the same hardcoded redirect URI
       const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -70,7 +56,7 @@ serve(async (req) => {
           client_secret: DISCORD_CLIENT_SECRET,
           grant_type: 'authorization_code',
           code,
-          redirect_uri: redirectUri,
+          redirect_uri: REDIRECT_URI,
         }),
       });
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  Home, ListMusic, History, FolderOpen, Sliders, 
+  Home, ListMusic, History, FolderOpen, Sliders, Settings,
   Menu, LogOut, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import DashboardQueue from "@/components/dashboard/DashboardQueue";
 import DashboardHistory from "@/components/dashboard/DashboardHistory";
 import DashboardPlaylists from "@/components/dashboard/DashboardPlaylists";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
+import DashboardSettings from "@/components/dashboard/DashboardSettings";
 import NowPlaying from "@/components/dashboard/NowPlaying";
 import ServerSelector from "@/components/dashboard/ServerSelector";
 
@@ -21,6 +22,7 @@ const navItems = [
   { id: "history", label: "History", icon: History },
   { id: "playlists", label: "Playlists", icon: FolderOpen },
   { id: "filters", label: "Filters & EQ", icon: Sliders },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 const Dashboard = () => {
@@ -52,6 +54,8 @@ const Dashboard = () => {
         return <DashboardPlaylists />;
       case "filters":
         return <DashboardFilters />;
+      case "settings":
+        return <DashboardSettings />;
       default:
         return <DashboardOverview />;
     }

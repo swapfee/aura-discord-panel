@@ -113,14 +113,12 @@ serve(async (req) => {
 
       if (existingProfile) {
         userId = existingProfile.id;
-        // Update profile
+        // Update profile (no tokens stored for security)
         await supabaseAdmin.from('profiles').update({
           discord_username: discordUser.username,
           discord_avatar: discordUser.avatar 
             ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
             : null,
-          discord_access_token: tokens.access_token,
-          discord_refresh_token: tokens.refresh_token,
           updated_at: new Date().toISOString(),
         }).eq('id', userId);
       } else {
@@ -147,12 +145,6 @@ serve(async (req) => {
         }
 
         userId = authUser.user.id;
-
-        // Update profile with tokens (trigger creates profile)
-        await supabaseAdmin.from('profiles').update({
-          discord_access_token: tokens.access_token,
-          discord_refresh_token: tokens.refresh_token,
-        }).eq('id', userId);
       }
 
       // Sync guilds - filter for admin guilds (permission 0x8 = ADMINISTRATOR)

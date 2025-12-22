@@ -17,30 +17,24 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
-          discord_access_token: string | null
           discord_avatar: string | null
           discord_id: string | null
-          discord_refresh_token: string | null
           discord_username: string | null
           id: string
           updated_at: string | null
         }
         Insert: {
           created_at?: string | null
-          discord_access_token?: string | null
           discord_avatar?: string | null
           discord_id?: string | null
-          discord_refresh_token?: string | null
           discord_username?: string | null
           id: string
           updated_at?: string | null
         }
         Update: {
           created_at?: string | null
-          discord_access_token?: string | null
           discord_avatar?: string | null
           discord_id?: string | null
-          discord_refresh_token?: string | null
           discord_username?: string | null
           id?: string
           updated_at?: string | null

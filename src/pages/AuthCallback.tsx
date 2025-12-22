@@ -71,16 +71,25 @@ const AuthCallback = () => {
           
           // Use the magic link to sign in
           const url = new URL(data.magicLink);
-          const token_hash = url.searchParams.get('token_hash');
+          
+          // Log all URL params for debugging
+          console.log("Magic link URL:", data.magicLink);
+          console.log("All URL params:", Object.fromEntries(url.searchParams.entries()));
+          
+          // Try both token_hash (PKCE) and token (legacy) params
+          const token_hash = url.searchParams.get('token_hash') || url.searchParams.get('token');
           const type = url.searchParams.get('type');
 
-          console.log("Magic link params:", { token_hash: !!token_hash, type });
+          console.log("Magic link params:", { token_hash: token_hash ? token_hash.substring(0, 10) + '...' : null, type });
 
           if (token_hash && type) {
-            const { error: verifyError } = await supabase.auth.verifyOtp({
+            console.log("Calling verifyOtp...");
+            const { data: otpData, error: verifyError } = await supabase.auth.verifyOtp({
               token_hash,
               type: type as any,
             });
+
+            console.log("verifyOtp result:", { success: !!otpData?.session, error: verifyError });
 
             if (verifyError) {
               console.error("OTP verification error:", verifyError);
@@ -88,10 +97,11 @@ const AuthCallback = () => {
               return;
             }
             
-            console.log("OTP verified successfully");
+            console.log("OTP verified successfully, session created");
           } else {
             console.error("Missing token_hash or type from magic link");
-            setError("Invalid authentication response");
+            console.error("Available params:", Object.fromEntries(url.searchParams.entries()));
+            setError("Invalid authentication response - missing token");
             return;
           }
 

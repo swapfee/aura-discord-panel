@@ -1,12 +1,30 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// Allowed origin for CORS - restrict to app domain only
-const ALLOWED_ORIGIN = 'https://jamwzfymmrqvdeoptlid.lovable.app';
+// Allowed origins for CORS - production and preview domains
+const ALLOWED_ORIGINS = [
+  'https://jamwzfymmrqvdeoptlid.lovable.app',
+];
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// Check if origin is allowed (includes lovableproject.com preview domains)
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  // Allow preview domains (*.lovableproject.com)
+  if (origin.endsWith('.lovableproject.com')) return true;
+  return false;
+}
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  if (isAllowedOrigin(origin)) {
+    return {
+      'Access-Control-Allow-Origin': origin!,
+      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    };
+  }
+  return {
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
+}
 
 const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')!;
 const DISCORD_CLIENT_SECRET = Deno.env.get('DISCORD_CLIENT_SECRET')!;
@@ -59,6 +77,9 @@ serve(async (req) => {
                    req.headers.get('cf-connecting-ip') || 
                    'unknown';
 
+  const origin = req.headers.get('origin');
+  const corsHeaders = getCorsHeaders(origin);
+
   // Apply rate limiting
   if (isRateLimited(clientIp)) {
     return new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
@@ -67,14 +88,8 @@ serve(async (req) => {
     });
   }
 
-  // Validate origin for security
-  const origin = req.headers.get('origin');
-  const responseHeaders = origin === ALLOWED_ORIGIN 
-    ? corsHeaders 
-    : { 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
-
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: responseHeaders });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
@@ -93,7 +108,7 @@ serve(async (req) => {
 
       console.log('Login flow initiated');
       return new Response(JSON.stringify({ url: discordAuthUrl.toString(), state }), {
-        headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -106,7 +121,7 @@ serve(async (req) => {
         console.error('Callback: missing authorization code');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -115,7 +130,7 @@ serve(async (req) => {
         console.error('Callback: invalid code format');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -124,7 +139,7 @@ serve(async (req) => {
         console.error('Callback: invalid state format');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -145,7 +160,7 @@ serve(async (req) => {
         console.error('Token exchange failed with status:', tokenResponse.status);
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -161,7 +176,7 @@ serve(async (req) => {
         console.error('User info fetch failed with status:', userResponse.status);
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -224,7 +239,7 @@ serve(async (req) => {
           console.error('User creation failed');
           return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
             status: 500,
-            headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
 
@@ -264,7 +279,7 @@ serve(async (req) => {
         console.error('Session generation failed');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 500,
-          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -274,20 +289,20 @@ serve(async (req) => {
         magicLink: sessionData.properties?.action_link,
         userId,
       }), {
-        headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     console.error('Invalid action requested');
     return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 400,
-      headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: unknown) {
     console.error('Unexpected error during authentication');
     return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 500,
-      headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

@@ -1,7 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
+// Allowed origin for CORS - restrict to app domain only
+const ALLOWED_ORIGIN = 'https://jamwzfymmrqvdeoptlid.lovable.app';
+
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
@@ -13,9 +16,18 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Hardcoded redirect URI - must match exactly what's registered in Discord Developer Portal
 const REDIRECT_URI = 'https://jamwzfymmrqvdeoptlid.lovable.app/auth/callback';
 
+// Generic error message for clients - never expose internal details
+const GENERIC_AUTH_ERROR = 'Authentication failed. Please try again.';
+
 serve(async (req) => {
+  // Validate origin for security
+  const origin = req.headers.get('origin');
+  const responseHeaders = origin === ALLOWED_ORIGIN 
+    ? corsHeaders 
+    : { 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: responseHeaders });
   }
 
   try {
@@ -33,7 +45,7 @@ serve(async (req) => {
       discordAuthUrl.searchParams.set('state', state);
 
       return new Response(JSON.stringify({ url: discordAuthUrl.toString(), state }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...responseHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -41,9 +53,10 @@ serve(async (req) => {
       const code = url.searchParams.get('code');
       
       if (!code) {
-        return new Response(JSON.stringify({ error: 'No code provided' }), {
+        console.error('Callback called without authorization code');
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -61,16 +74,16 @@ serve(async (req) => {
       });
 
       if (!tokenResponse.ok) {
-        const error = await tokenResponse.text();
-        console.error('Token exchange failed:', error);
-        return new Response(JSON.stringify({ error: 'Token exchange failed' }), {
+        const errorDetails = await tokenResponse.text();
+        console.error('Discord token exchange failed:', errorDetails);
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
         });
       }
 
       const tokens = await tokenResponse.json();
-      console.log('Discord tokens received');
+      console.log('Discord tokens received successfully');
 
       // Get user info
       const userResponse = await fetch('https://discord.com/api/users/@me', {
@@ -78,14 +91,15 @@ serve(async (req) => {
       });
 
       if (!userResponse.ok) {
-        return new Response(JSON.stringify({ error: 'Failed to get user info' }), {
+        console.error('Failed to fetch Discord user info:', userResponse.status);
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
         });
       }
 
       const discordUser = await userResponse.json();
-      console.log('Discord user:', discordUser.username);
+      console.log('Discord user authenticated:', discordUser.id);
 
       // Get user guilds
       const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
@@ -95,7 +109,9 @@ serve(async (req) => {
       let guilds = [];
       if (guildsResponse.ok) {
         guilds = await guildsResponse.json();
-        console.log('Fetched guilds:', guilds.length);
+        console.log('Fetched guilds count:', guilds.length);
+      } else {
+        console.error('Failed to fetch guilds:', guildsResponse.status);
       }
 
       // Create Supabase client
@@ -137,10 +153,10 @@ serve(async (req) => {
         });
 
         if (authError) {
-          console.error('Auth user creation failed:', authError);
-          return new Response(JSON.stringify({ error: 'Failed to create user' }), {
+          console.error('User creation failed:', authError.message);
+          return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
             status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            headers: { ...responseHeaders, 'Content-Type': 'application/json' },
           });
         }
 
@@ -166,7 +182,7 @@ serve(async (req) => {
         }));
 
         await supabaseAdmin.from('user_servers').insert(serverData);
-        console.log('Synced servers:', adminGuilds.length);
+        console.log('Synced admin servers:', adminGuilds.length);
       }
 
       // Generate session token for the user
@@ -176,10 +192,10 @@ serve(async (req) => {
       });
 
       if (sessionError) {
-        console.error('Session generation failed:', sessionError);
-        return new Response(JSON.stringify({ error: 'Failed to generate session' }), {
+        console.error('Session generation failed:', sessionError.message);
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
         });
       }
 
@@ -188,20 +204,19 @@ serve(async (req) => {
         magicLink: sessionData.properties?.action_link,
         userId,
       }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...responseHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    return new Response(JSON.stringify({ error: 'Invalid action' }), {
+    return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...responseHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: unknown) {
-    console.error('Discord auth error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    console.error('Discord auth error:', error instanceof Error ? error.message : 'Unknown error');
+    return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...responseHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

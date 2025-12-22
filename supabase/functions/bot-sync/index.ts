@@ -6,8 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-bot-secret",
 };
 
-// Bot secret for authentication (set this in your bot config)
-const BOT_SECRET = Deno.env.get("BOT_SYNC_SECRET");
+// Bot secret for authentication (must match BOT_SECRET in your bot's .env)
+const BOT_SECRET = Deno.env.get("BOT_SECRET");
 
 interface NowPlaying {
   title: string;

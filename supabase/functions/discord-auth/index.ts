@@ -19,7 +19,54 @@ const REDIRECT_URI = 'https://jamwzfymmrqvdeoptlid.lovable.app/auth/callback';
 // Generic error message for clients - never expose internal details
 const GENERIC_AUTH_ERROR = 'Authentication failed. Please try again.';
 
+// Simple in-memory rate limiting (resets on cold start, but provides basic protection)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 10; // 10 requests per minute per IP
+
+function isRateLimited(clientIp: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(clientIp);
+  
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+  
+  entry.count++;
+  if (entry.count > MAX_REQUESTS_PER_WINDOW) {
+    console.warn('Rate limit exceeded for client');
+    return true;
+  }
+  
+  return false;
+}
+
+// Validate OAuth code format - Discord codes are alphanumeric with potential special chars
+function isValidOAuthCode(code: string): boolean {
+  // Discord OAuth codes are typically 30 characters, alphanumeric
+  return /^[a-zA-Z0-9]{20,50}$/.test(code);
+}
+
+// Validate state parameter format - should be a UUID
+function isValidState(state: string): boolean {
+  return /^[a-f0-9-]{36}$/.test(state);
+}
+
 serve(async (req) => {
+  // Get client IP for rate limiting (from headers set by edge runtime)
+  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+                   req.headers.get('cf-connecting-ip') || 
+                   'unknown';
+
+  // Apply rate limiting
+  if (isRateLimited(clientIp)) {
+    return new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
+      status: 429,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' },
+    });
+  }
+
   // Validate origin for security
   const origin = req.headers.get('origin');
   const responseHeaders = origin === ALLOWED_ORIGIN 
@@ -44,6 +91,7 @@ serve(async (req) => {
       discordAuthUrl.searchParams.set('scope', 'identify guilds');
       discordAuthUrl.searchParams.set('state', state);
 
+      console.log('Login flow initiated');
       return new Response(JSON.stringify({ url: discordAuthUrl.toString(), state }), {
         headers: { ...responseHeaders, 'Content-Type': 'application/json' },
       });
@@ -51,9 +99,29 @@ serve(async (req) => {
 
     if (action === 'callback') {
       const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
       
+      // Validate code parameter
       if (!code) {
-        console.error('Callback called without authorization code');
+        console.error('Callback: missing authorization code');
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
+          status: 400,
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Validate code format to prevent malformed input
+      if (!isValidOAuthCode(code)) {
+        console.error('Callback: invalid code format');
+        return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
+          status: 400,
+          headers: { ...responseHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Validate state format if provided
+      if (state && !isValidState(state)) {
+        console.error('Callback: invalid state format');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
           headers: { ...responseHeaders, 'Content-Type': 'application/json' },
@@ -74,8 +142,7 @@ serve(async (req) => {
       });
 
       if (!tokenResponse.ok) {
-        const errorDetails = await tokenResponse.text();
-        console.error('Discord token exchange failed:', errorDetails);
+        console.error('Token exchange failed with status:', tokenResponse.status);
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
           headers: { ...responseHeaders, 'Content-Type': 'application/json' },
@@ -83,7 +150,7 @@ serve(async (req) => {
       }
 
       const tokens = await tokenResponse.json();
-      console.log('Discord tokens received successfully');
+      console.log('Token exchange successful');
 
       // Get user info
       const userResponse = await fetch('https://discord.com/api/users/@me', {
@@ -91,7 +158,7 @@ serve(async (req) => {
       });
 
       if (!userResponse.ok) {
-        console.error('Failed to fetch Discord user info:', userResponse.status);
+        console.error('User info fetch failed with status:', userResponse.status);
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 400,
           headers: { ...responseHeaders, 'Content-Type': 'application/json' },
@@ -99,7 +166,7 @@ serve(async (req) => {
       }
 
       const discordUser = await userResponse.json();
-      console.log('Discord user authenticated:', discordUser.id);
+      console.log('User info retrieved successfully');
 
       // Get user guilds
       const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
@@ -109,9 +176,9 @@ serve(async (req) => {
       let guilds = [];
       if (guildsResponse.ok) {
         guilds = await guildsResponse.json();
-        console.log('Fetched guilds count:', guilds.length);
+        console.log('Guilds fetched successfully');
       } else {
-        console.error('Failed to fetch guilds:', guildsResponse.status);
+        console.error('Guild fetch failed with status:', guildsResponse.status);
       }
 
       // Create Supabase client
@@ -137,6 +204,7 @@ serve(async (req) => {
             : null,
           updated_at: new Date().toISOString(),
         }).eq('id', userId);
+        console.log('Existing user profile updated');
       } else {
         // Create new user in auth.users
         const email = `${discordUser.id}@discord.user`;
@@ -153,7 +221,7 @@ serve(async (req) => {
         });
 
         if (authError) {
-          console.error('User creation failed:', authError.message);
+          console.error('User creation failed');
           return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
             status: 500,
             headers: { ...responseHeaders, 'Content-Type': 'application/json' },
@@ -161,6 +229,7 @@ serve(async (req) => {
         }
 
         userId = authUser.user.id;
+        console.log('New user created successfully');
       }
 
       // Sync guilds - filter for admin guilds (permission 0x8 = ADMINISTRATOR)
@@ -182,7 +251,7 @@ serve(async (req) => {
         }));
 
         await supabaseAdmin.from('user_servers').insert(serverData);
-        console.log('Synced admin servers:', adminGuilds.length);
+        console.log('Admin servers synced');
       }
 
       // Generate session token for the user
@@ -192,13 +261,14 @@ serve(async (req) => {
       });
 
       if (sessionError) {
-        console.error('Session generation failed:', sessionError.message);
+        console.error('Session generation failed');
         return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
           status: 500,
           headers: { ...responseHeaders, 'Content-Type': 'application/json' },
         });
       }
 
+      console.log('Authentication completed successfully');
       return new Response(JSON.stringify({ 
         success: true,
         magicLink: sessionData.properties?.action_link,
@@ -208,12 +278,13 @@ serve(async (req) => {
       });
     }
 
+    console.error('Invalid action requested');
     return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 400,
       headers: { ...responseHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: unknown) {
-    console.error('Discord auth error:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Unexpected error during authentication');
     return new Response(JSON.stringify({ error: GENERIC_AUTH_ERROR }), {
       status: 500,
       headers: { ...responseHeaders, 'Content-Type': 'application/json' },

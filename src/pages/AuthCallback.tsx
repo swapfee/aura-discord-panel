@@ -7,20 +7,29 @@ const AuthCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("Initializing...");
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
         const code = searchParams.get('code');
         const state = searchParams.get('state');
-        const storedState = sessionStorage.getItem('discord_oauth_state');
+        const errorParam = searchParams.get('error');
+        
+        console.log("Auth callback started", { code: !!code, state: !!state, error: errorParam });
 
-        // Clear stored state
-        sessionStorage.removeItem('discord_oauth_state');
+        // Handle Discord error
+        if (errorParam) {
+          setError(`Discord error: ${errorParam}`);
+          return;
+        }
 
         if (!code) {
-          // Check if this is a magic link callback
-          const { data, error } = await supabase.auth.getSession();
+          setStatus("Checking existing session...");
+          // Check if this is a magic link callback or if already logged in
+          const { data, error: sessionError } = await supabase.auth.getSession();
+          console.log("Session check:", { hasSession: !!data.session, error: sessionError });
+          
           if (data.session) {
             navigate("/dashboard");
             return;
@@ -29,17 +38,25 @@ const AuthCallback = () => {
           return;
         }
 
-        // Only validate state if both are present (state might be missing due to cross-origin redirect)
-        if (state && storedState && state !== storedState) {
-          console.warn("State mismatch - possible cross-origin redirect");
-          // Don't block - proceed with caution but allow the flow
-        }
+        setStatus("Exchanging code with Discord...");
 
         // Exchange code for session via edge function
-        const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=callback&code=${code}`;
+        const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=callback&code=${encodeURIComponent(code)}`;
         
         console.log("Calling callback function...");
-        const response = await fetch(functionUrl);
+        const response = await fetch(functionUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          console.error("Callback response not OK:", response.status);
+          setError(`Server error: ${response.status}`);
+          return;
+        }
+        
         const data = await response.json();
         console.log("Callback response:", data);
 
@@ -50,10 +67,14 @@ const AuthCallback = () => {
         }
 
         if (data.success && data.magicLink) {
+          setStatus("Verifying session...");
+          
           // Use the magic link to sign in
           const url = new URL(data.magicLink);
           const token_hash = url.searchParams.get('token_hash');
           const type = url.searchParams.get('type');
+
+          console.log("Magic link params:", { token_hash: !!token_hash, type });
 
           if (token_hash && type) {
             const { error: verifyError } = await supabase.auth.verifyOtp({
@@ -66,15 +87,23 @@ const AuthCallback = () => {
               setError(verifyError.message);
               return;
             }
+            
+            console.log("OTP verified successfully");
+          } else {
+            console.error("Missing token_hash or type from magic link");
+            setError("Invalid authentication response");
+            return;
           }
 
+          setStatus("Success! Redirecting...");
           navigate("/dashboard");
         } else {
-          setError("Authentication failed");
+          console.error("Missing success or magicLink in response:", data);
+          setError("Authentication failed - no session created");
         }
       } catch (err) {
         console.error("Callback error:", err);
-        setError("An unexpected error occurred");
+        setError(`An unexpected error occurred: ${err instanceof Error ? err.message : 'Unknown'}`);
       }
     };
 
@@ -108,7 +137,7 @@ const AuthCallback = () => {
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
         </div>
         <h1 className="text-xl font-semibold text-foreground mb-2">Authenticating</h1>
-        <p className="text-muted-foreground">Syncing your Discord servers...</p>
+        <p className="text-muted-foreground">{status}</p>
       </div>
     </div>
   );

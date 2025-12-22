@@ -161,9 +161,8 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
                     onClick={(e) => {
                       e.stopPropagation();
                       // Open Discord bot invite URL with pre-selected guild
-                      const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID || "1319737099020414976";
                       window.open(
-                        `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=3145728&scope=bot%20applications.commands&guild_id=${server.discord_server_id}`,
+                        `https://discord.com/oauth2/authorize?client_id=1449947972191125676&permissions=8&scope=bot%20applications.commands&guild_id=${server.discord_server_id}`,
                         "_blank"
                       );
                     }}

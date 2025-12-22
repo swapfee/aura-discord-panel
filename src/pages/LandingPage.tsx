@@ -38,8 +38,8 @@ const LandingPage = () => {
   const navigate = useNavigate();
   const { user, loading, signInWithDiscord } = useAuth();
 
-  // Bot invite URL - permissions: Connect, Speak, Use Voice Activity
-  const BOT_INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${import.meta.env.VITE_DISCORD_CLIENT_ID || "1319737099020414976"}&permissions=3145728&scope=bot%20applications.commands`;
+  // Bot invite URL - permissions: Administrator
+  const BOT_INVITE_URL = `https://discord.com/oauth2/authorize?client_id=1449947972191125676&permissions=8&scope=bot%20applications.commands`;
 
   const handleAddToDiscord = () => {
     window.open(BOT_INVITE_URL, "_blank");

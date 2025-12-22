@@ -38,6 +38,13 @@ const LandingPage = () => {
   const navigate = useNavigate();
   const { user, loading, signInWithDiscord } = useAuth();
 
+  // Bot invite URL - permissions: Connect, Speak, Use Voice Activity
+  const BOT_INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${import.meta.env.VITE_DISCORD_CLIENT_ID || "1319737099020414976"}&permissions=3145728&scope=bot%20applications.commands`;
+
+  const handleAddToDiscord = () => {
+    window.open(BOT_INVITE_URL, "_blank");
+  };
+
   const handleDiscordLogin = async () => {
     try {
       await signInWithDiscord();
@@ -100,7 +107,7 @@ const LandingPage = () => {
                 Login
               </Button>
             )}
-            <Button variant="hero" size="sm">
+            <Button variant="hero" size="sm" onClick={handleAddToDiscord}>
               <DiscordIcon className="w-4 h-4" />
               Add to Discord
             </Button>
@@ -131,7 +138,7 @@ const LandingPage = () => {
           
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in" style={{ animationDelay: "0.3s" }}>
-            <Button variant="hero" size="xl">
+            <Button variant="hero" size="xl" onClick={handleAddToDiscord}>
               <DiscordIcon className="w-5 h-5" />
               Add to Discord
             </Button>
@@ -211,7 +218,7 @@ const LandingPage = () => {
               Join thousands of servers already using SoundWave for the best music experience.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Button variant="hero" size="lg">
+              <Button variant="hero" size="lg" onClick={handleAddToDiscord}>
                 <DiscordIcon className="w-5 h-5" />
                 Add to Discord — It's Free
               </Button>

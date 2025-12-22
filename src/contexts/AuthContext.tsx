@@ -108,21 +108,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signInWithDiscord = async () => {
-    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=login`;
-    
-    const response = await fetch(functionUrl);
-    const data = await response.json();
-    
-    if (data.error) {
-      console.error("Error getting Discord auth URL:", data.error);
-      throw new Error(data.error);
+    try {
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=login`;
+      
+      const response = await fetch(functionUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        console.error("Error getting Discord auth URL:", data.error);
+        throw new Error(data.error);
+      }
+      
+      // Store state for verification
+      sessionStorage.setItem('discord_oauth_state', data.state);
+      
+      // Redirect to Discord
+      window.location.href = data.url;
+    } catch (error) {
+      console.error("Discord login failed:", error);
+      throw error;
     }
-    
-    // Store state for verification
-    sessionStorage.setItem('discord_oauth_state', data.state);
-    
-    // Redirect to Discord
-    window.location.href = data.url;
   };
 
   const signOut = async () => {

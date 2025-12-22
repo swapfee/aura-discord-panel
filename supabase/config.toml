@@ -2,3 +2,9 @@ project_id = "jamwzfymmrqvdeoptlid"
 
 [functions.discord-auth]
 verify_jwt = false
+
+[functions.bot-sync]
+verify_jwt = false
+
+[functions.bot-command]
+verify_jwt = false

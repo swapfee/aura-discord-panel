@@ -1,0 +1,112 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-bot-secret",
+};
+
+// Bot secret for authentication (set this in your bot config)
+const BOT_SECRET = Deno.env.get("BOT_SYNC_SECRET");
+
+interface NowPlaying {
+  title: string;
+  artist: string;
+  thumbnail: string;
+  duration: number;
+  position: number;
+  requestedBy: string;
+  url: string;
+}
+
+interface QueueItem {
+  id: string;
+  title: string;
+  artist: string;
+  thumbnail: string;
+  duration: number;
+  requestedBy: string;
+  url: string;
+  addedAt: string;
+}
+
+interface HistoryItem extends QueueItem {
+  playedAt: string;
+}
+
+interface BotSyncPayload {
+  action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync";
+  serverId: string;
+  data: {
+    nowPlaying?: NowPlaying | null;
+    queue?: QueueItem[];
+    history?: HistoryItem[];
+    status?: {
+      isPlaying: boolean;
+      isPaused: boolean;
+      volume: number;
+      loop: "off" | "track" | "queue";
+      shuffle: boolean;
+    };
+  };
+}
+
+serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const botSecret = req.headers.get("x-bot-secret");
+    
+    // Verify bot secret
+    if (!BOT_SECRET || botSecret !== BOT_SECRET) {
+      console.error("Invalid bot secret");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const payload: BotSyncPayload = await req.json();
+    console.log("Received bot sync:", payload.action, "for server:", payload.serverId);
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Broadcast to all connected clients via Supabase Realtime
+    const channel = supabase.channel(`server:${payload.serverId}`);
+    
+    // Send the update through the channel
+    await channel.send({
+      type: "broadcast",
+      event: payload.action,
+      payload: {
+        serverId: payload.serverId,
+        ...payload.data,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    console.log("Broadcast sent for action:", payload.action);
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: `${payload.action} broadcast sent`,
+        serverId: payload.serverId 
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (error) {
+    console.error("Bot sync error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return new Response(
+      JSON.stringify({ error: message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});

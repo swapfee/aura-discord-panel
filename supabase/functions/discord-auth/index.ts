@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // Allowed origins for CORS - production and preview domains
 const ALLOWED_ORIGINS = [
-  'https://jamwzfymmrqvdeoptlid.lovable.app',
+  'https://aura-discord-panel.lovable.app',
 ];
 
 // Check if origin is allowed (includes lovableproject.com preview domains and lovable.app domains)
@@ -34,7 +34,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // Hardcoded redirect URI - must match exactly what's registered in Discord Developer Portal
-const REDIRECT_URI = 'https://jamwzfymmrqvdeoptlid.lovable.app/auth/callback';
+const REDIRECT_URI = 'https://aura-discord-panel.lovable.app/auth/callback';
 
 // Generic error message for clients - never expose internal details
 const GENERIC_AUTH_ERROR = 'Authentication failed. Please try again.';

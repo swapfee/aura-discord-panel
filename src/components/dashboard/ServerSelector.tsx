@@ -74,43 +74,47 @@ const ServerSelector = ({ collapsed = false }: ServerSelectorProps) => {
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
           <div className="p-2 space-y-1 max-h-64 overflow-y-auto">
             {mockServers.map((server) => (
-              <button
+              <div
                 key={server.id}
-                onClick={() => handleServerSelect(server)}
                 className={cn(
-                  "w-full flex items-center gap-3 p-2 rounded-lg transition-colors text-left",
+                  "w-full p-2 rounded-lg transition-colors",
                   selectedServer.id === server.id 
                     ? "bg-primary/10 border border-primary/20" 
                     : "hover:bg-secondary"
                 )}
               >
-                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-xl shrink-0">
-                  {server.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {server.name}
-                    </p>
-                    {selectedServer.id === server.id && (
-                      <Check className="w-4 h-4 text-primary shrink-0" />
-                    )}
+                <button
+                  onClick={() => handleServerSelect(server)}
+                  className="w-full flex items-center gap-3 text-left"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-xl shrink-0">
+                    {server.icon}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Users className="w-3 h-3" />
-                    <span>{server.memberCount.toLocaleString()}</span>
-                    {server.botConnected ? (
-                      <span className="text-success">• Connected</span>
-                    ) : (
-                      <span className="text-warning">• Not connected</span>
-                    )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {server.name}
+                      </p>
+                      {selectedServer.id === server.id && (
+                        <Check className="w-4 h-4 text-primary shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Users className="w-3 h-3" />
+                      <span>{server.memberCount.toLocaleString()}</span>
+                      {server.botConnected ? (
+                        <span className="text-success">• Connected</span>
+                      ) : (
+                        <span className="text-warning">• Not connected</span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </button>
                 {!server.botConnected && (
                   <Button
                     variant="hero"
                     size="sm"
-                    className="shrink-0"
+                    className="w-full mt-2"
                     onClick={(e) => {
                       e.stopPropagation();
                       // Handle add bot action
@@ -120,7 +124,7 @@ const ServerSelector = ({ collapsed = false }: ServerSelectorProps) => {
                     Add Bot
                   </Button>
                 )}
-              </button>
+              </div>
             ))}
           </div>
         </div>

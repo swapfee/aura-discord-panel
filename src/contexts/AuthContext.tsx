@@ -108,20 +108,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signInWithDiscord = async () => {
-    const redirectUrl = `${window.location.origin}/auth/callback`;
+    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=login`;
     
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "discord",
-      options: {
-        redirectTo: redirectUrl,
-        scopes: "identify guilds",
-      },
-    });
-
-    if (error) {
-      console.error("Error signing in with Discord:", error);
-      throw error;
+    const response = await fetch(functionUrl);
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error("Error getting Discord auth URL:", data.error);
+      throw new Error(data.error);
     }
+    
+    // Store state for verification
+    sessionStorage.setItem('discord_oauth_state', data.state);
+    
+    // Redirect to Discord
+    window.location.href = data.url;
   };
 
   const signOut = async () => {

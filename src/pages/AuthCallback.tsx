@@ -1,80 +1,73 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Music, Loader2 } from "lucide-react";
 
 const AuthCallback = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Auth callback error:", error);
-          setError(error.message);
+        const code = searchParams.get('code');
+        const state = searchParams.get('state');
+        const storedState = sessionStorage.getItem('discord_oauth_state');
+
+        // Clear stored state
+        sessionStorage.removeItem('discord_oauth_state');
+
+        if (!code) {
+          // Check if this is a magic link callback
+          const { data, error } = await supabase.auth.getSession();
+          if (data.session) {
+            navigate("/dashboard");
+            return;
+          }
+          setError("No authorization code received");
           return;
         }
 
-        if (data.session) {
-          // Sync Discord guilds to user_servers
-          const accessToken = data.session.provider_token;
-          
-          if (accessToken) {
-            try {
-              // Fetch user's Discord guilds
-              const guildsResponse = await fetch("https://discord.com/api/users/@me/guilds", {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                },
-              });
+        if (state && storedState && state !== storedState) {
+          setError("Invalid state parameter");
+          return;
+        }
 
-              if (guildsResponse.ok) {
-                const guilds = await guildsResponse.json();
-                
-                // Filter to servers where user has admin permissions
-                const adminGuilds = guilds.filter((guild: any) => 
-                  (guild.permissions & 0x8) === 0x8 || guild.owner
-                );
+        // Exchange code for session via edge function
+        const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=callback&code=${code}`;
+        
+        const response = await fetch(functionUrl);
+        const data = await response.json();
 
-                // Upsert servers to database
-                for (const guild of adminGuilds) {
-                  await supabase.from("user_servers").upsert({
-                    user_id: data.session.user.id,
-                    discord_server_id: guild.id,
-                    server_name: guild.name,
-                    server_icon: guild.icon 
-                      ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png`
-                      : null,
-                    member_count: guild.approximate_member_count || 0,
-                    is_admin: true,
-                    bot_connected: false, // Default to false, update when bot is added
-                  }, {
-                    onConflict: "user_id,discord_server_id",
-                  });
-                }
-              }
-            } catch (guildError) {
-              console.error("Error fetching guilds:", guildError);
-              // Don't block login if guild fetch fails
+        if (data.error) {
+          console.error("Discord callback error:", data.error);
+          setError(data.error);
+          return;
+        }
+
+        if (data.success && data.magicLink) {
+          // Use the magic link to sign in
+          const url = new URL(data.magicLink);
+          const token_hash = url.searchParams.get('token_hash');
+          const type = url.searchParams.get('type');
+
+          if (token_hash && type) {
+            const { error: verifyError } = await supabase.auth.verifyOtp({
+              token_hash,
+              type: type as any,
+            });
+
+            if (verifyError) {
+              console.error("OTP verification error:", verifyError);
+              setError(verifyError.message);
+              return;
             }
           }
 
-          // Update profile with Discord info
-          const { user } = data.session;
-          await supabase.from("profiles").upsert({
-            id: user.id,
-            discord_id: user.user_metadata?.provider_id || user.user_metadata?.sub,
-            discord_username: user.user_metadata?.full_name || user.user_metadata?.name,
-            discord_avatar: user.user_metadata?.avatar_url,
-            discord_access_token: accessToken,
-          });
-
           navigate("/dashboard");
         } else {
-          navigate("/");
+          setError("Authentication failed");
         }
       } catch (err) {
         console.error("Callback error:", err);
@@ -83,7 +76,7 @@ const AuthCallback = () => {
     };
 
     handleCallback();
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   if (error) {
     return (

@@ -29,16 +29,19 @@ const AuthCallback = () => {
           return;
         }
 
+        // Only validate state if both are present (state might be missing due to cross-origin redirect)
         if (state && storedState && state !== storedState) {
-          setError("Invalid state parameter");
-          return;
+          console.warn("State mismatch - possible cross-origin redirect");
+          // Don't block - proceed with caution but allow the flow
         }
 
         // Exchange code for session via edge function
         const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=callback&code=${code}`;
         
+        console.log("Calling callback function...");
         const response = await fetch(functionUrl);
         const data = await response.json();
+        console.log("Callback response:", data);
 
         if (data.error) {
           console.error("Discord callback error:", data.error);

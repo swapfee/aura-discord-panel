@@ -1,173 +1,95 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { User, Session } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import { Tables } from "@/integrations/supabase/types";
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 
-type Profile = Tables<"profiles">;
-type UserServer = Tables<"user_servers">;
+type AuthUser = {
+  id: string;
+  username: string;
+  email?: string | null;
+  avatar?: string | null;
+};
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  profile: Profile | null;
-  servers: UserServer[];
+  user: AuthUser | null;
   loading: boolean;
   signInWithDiscord: () => Promise<void>;
   signOut: () => Promise<void>;
-  refreshServers: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [servers, setServers] = useState<UserServer[]>([]);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (error) {
-      console.error("Error fetching profile:", error);
-      return null;
+  const refreshUser = async () => {
+    if (!API_BASE) {
+      console.error("Missing VITE_API_BASE_URL");
+      setUser(null);
+      return;
     }
-    return data;
-  };
 
-  const fetchServers = async (userId: string) => {
-    const { data, error } = await supabase
-      .from("user_servers")
-      .select("*")
-      .eq("user_id", userId)
-      .order("server_name");
+    try {
+      const r = await fetch(`${API_BASE}/api/me`, {
+        credentials: "include",
+      });
 
-    if (error) {
-      console.error("Error fetching servers:", error);
-      return [];
-    }
-    return data || [];
-  };
+      if (!r.ok) {
+        setUser(null);
+        return;
+      }
 
-  const refreshServers = async () => {
-    if (user) {
-      const userServers = await fetchServers(user.id);
-      setServers(userServers);
+      const data = await r.json();
+      setUser(data.user ?? null);
+    } catch (e) {
+      console.error("Failed to refresh user:", e);
+      setUser(null);
     }
   };
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-
-        // Defer profile and server fetching with setTimeout to prevent deadlock
-        if (session?.user) {
-          setTimeout(async () => {
-            const userProfile = await fetchProfile(session.user.id);
-            setProfile(userProfile);
-            const userServers = await fetchServers(session.user.id);
-            setServers(userServers);
-            setLoading(false);
-          }, 0);
-        } else {
-          setProfile(null);
-          setServers([]);
-          setLoading(false);
-        }
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        Promise.all([
-          fetchProfile(session.user.id),
-          fetchServers(session.user.id)
-        ]).then(([userProfile, userServers]) => {
-          setProfile(userProfile);
-          setServers(userServers);
-          setLoading(false);
-        });
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    (async () => {
+      setLoading(true);
+      await refreshUser();
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signInWithDiscord = async () => {
-    try {
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discord-auth?action=login`;
-      
-      const response = await fetch(functionUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.error) {
-        console.error("Error getting Discord auth URL:", data.error);
-        throw new Error(data.error);
-      }
-      
-      // Store state for verification
-      sessionStorage.setItem('discord_oauth_state', data.state);
-      
-      // Redirect to Discord
-      window.location.href = data.url;
-    } catch (error) {
-      console.error("Discord login failed:", error);
-      throw error;
-    }
+    if (!API_BASE) throw new Error("Missing VITE_API_BASE_URL");
+    // Redirect to backend which starts the OAuth flow
+    window.location.href = `${API_BASE}/auth/discord`;
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error("Error signing out:", error);
-      throw error;
+    if (!API_BASE) throw new Error("Missing VITE_API_BASE_URL");
+
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (e) {
+      console.error("Logout request failed:", e);
+    } finally {
+      setUser(null);
     }
-    setUser(null);
-    setSession(null);
-    setProfile(null);
-    setServers([]);
   };
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        servers,
-        loading,
-        signInWithDiscord,
-        signOut,
-        refreshServers,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      signInWithDiscord,
+      signOut,
+      refreshUser,
+    }),
+    [user, loading]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {

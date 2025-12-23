@@ -35,7 +35,7 @@ interface HistoryItem extends QueueItem {
 }
 
 interface BotSyncPayload {
-  action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync";
+  action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync" | "bot_connected" | "bot_disconnected";
   serverId: string;
   data: {
     nowPlaying?: NowPlaying | null;
@@ -75,6 +75,37 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Handle bot connection status updates
+    if (payload.action === "bot_connected" || payload.action === "bot_disconnected") {
+      const isConnected = payload.action === "bot_connected";
+      console.log(`Updating bot_connected to ${isConnected} for server:`, payload.serverId);
+      
+      // Update all user_servers entries for this Discord server
+      const { error: updateError } = await supabase
+        .from("user_servers")
+        .update({ bot_connected: isConnected, updated_at: new Date().toISOString() })
+        .eq("discord_server_id", payload.serverId);
+      
+      if (updateError) {
+        console.error("Error updating bot_connected:", updateError);
+        return new Response(
+          JSON.stringify({ error: "Failed to update connection status" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      console.log(`Bot connection status updated to ${isConnected}`);
+      
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: `Bot ${isConnected ? "connected" : "disconnected"} status updated`,
+          serverId: payload.serverId 
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Broadcast to all connected clients via Supabase Realtime
     const channel = supabase.channel(`server:${payload.serverId}`);

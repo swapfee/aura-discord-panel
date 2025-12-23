@@ -49,6 +49,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
+    console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
     (async () => {
       setLoading(true);
       await refreshUser();

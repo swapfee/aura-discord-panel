@@ -35,8 +35,9 @@ interface HistoryItem extends QueueItem {
 }
 
 interface BotSyncPayload {
-  action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync" | "bot_connected" | "bot_disconnected";
-  serverId: string;
+  action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync" | "bot_connected" | "bot_disconnected" | "bot_connected_batch";
+  serverId?: string;
+  servers?: string[]; // For batch operations
   // Data can be at root level (from bot) or in data object
   nowPlaying?: NowPlaying | null;
   queue?: QueueItem[];
@@ -75,7 +76,36 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Handle bot connection status updates
+    // Handle batch bot connection (startup sync for multiple servers)
+    if (payload.action === "bot_connected_batch" && payload.servers) {
+      console.log(`Batch updating bot_connected for ${payload.servers.length} servers`);
+      
+      const { error: updateError } = await supabase
+        .from("user_servers")
+        .update({ bot_connected: true, updated_at: new Date().toISOString() })
+        .in("discord_server_id", payload.servers);
+      
+      if (updateError) {
+        console.error("Error batch updating bot_connected:", updateError);
+        return new Response(
+          JSON.stringify({ error: "Failed to batch update connection status" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      console.log(`Batch bot connection status updated for ${payload.servers.length} servers`);
+      
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: `Bot connected status updated for ${payload.servers.length} servers`,
+          servers: payload.servers 
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Handle single bot connection status updates
     if (payload.action === "bot_connected" || payload.action === "bot_disconnected") {
       const isConnected = payload.action === "bot_connected";
       console.log(`Updating bot_connected to ${isConnected} for server:`, payload.serverId);

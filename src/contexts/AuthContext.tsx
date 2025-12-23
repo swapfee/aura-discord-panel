@@ -58,11 +58,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const signInWithDiscord = async () => {
-    if (!API_BASE) throw new Error("Missing VITE_API_BASE_URL");
-    // Redirect to backend which starts the OAuth flow
-    window.location.href = `${API_BASE}/auth/discord`;
-  };
+const signInWithDiscord = async () => {
+  window.location.href = "https://aura-api-production.up.railway.app/auth/discord";
+};
+
 
   const signOut = async () => {
     if (!API_BASE) throw new Error("Missing VITE_API_BASE_URL");

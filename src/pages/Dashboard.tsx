@@ -33,12 +33,6 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Auto-select first server on load
-  useEffect(() => {
-    if (servers.length > 0 && servers[0].discord_server_id) {
-      setCurrentServerId(servers[0].discord_server_id);
-    }
-  }, [servers, setCurrentServerId]);
 
   const handleServerChange = (discordServerId: string) => {
     console.log("Server changed to:", discordServerId);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown, Plus, Check, Users, ServerOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,9 +13,18 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
   const { servers, refreshServers } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(
-    servers.length > 0 ? servers[0].id : null
-  );
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+  const initializedRef = useRef(false);
+
+  // Auto-select first server and notify parent on initial load
+  useEffect(() => {
+    if (servers.length > 0 && !initializedRef.current) {
+      const firstServer = servers[0];
+      setSelectedServerId(firstServer.id);
+      onServerChange?.(firstServer.discord_server_id);
+      initializedRef.current = true;
+    }
+  }, [servers, onServerChange]);
 
   const handleRefresh = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -29,7 +38,6 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
   const handleServerSelect = (server: typeof servers[0]) => {
     setSelectedServerId(server.id);
     setIsOpen(false);
-    // Pass the Discord server ID to the callback, not the database ID
     onServerChange?.(server.discord_server_id);
   };
 

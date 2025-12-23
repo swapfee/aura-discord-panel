@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBot } from "@/contexts/BotContext";
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import DashboardQueue from "@/components/dashboard/DashboardQueue";
 import DashboardHistory from "@/components/dashboard/DashboardHistory";
@@ -27,9 +28,22 @@ const navItems = [
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, servers, loading, signOut } = useAuth();
+  const { setCurrentServerId } = useBot();
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Auto-select first server on load
+  useEffect(() => {
+    if (servers.length > 0 && servers[0].discord_server_id) {
+      setCurrentServerId(servers[0].discord_server_id);
+    }
+  }, [servers, setCurrentServerId]);
+
+  const handleServerChange = (discordServerId: string) => {
+    console.log("Server changed to:", discordServerId);
+    setCurrentServerId(discordServerId);
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -104,7 +118,7 @@ const Dashboard = () => {
 
         {/* Server Selector */}
         <div className="p-3">
-          <ServerSelector collapsed={!sidebarOpen} />
+          <ServerSelector collapsed={!sidebarOpen} onServerChange={handleServerChange} />
         </div>
 
         {/* Navigation */}

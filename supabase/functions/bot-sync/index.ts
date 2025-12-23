@@ -37,17 +37,16 @@ interface HistoryItem extends QueueItem {
 interface BotSyncPayload {
   action: "update_now_playing" | "update_queue" | "add_history" | "update_status" | "full_sync" | "bot_connected" | "bot_disconnected";
   serverId: string;
-  data: {
-    nowPlaying?: NowPlaying | null;
-    queue?: QueueItem[];
-    history?: HistoryItem[];
-    status?: {
-      isPlaying: boolean;
-      isPaused: boolean;
-      volume: number;
-      loop: "off" | "track" | "queue";
-      shuffle: boolean;
-    };
+  // Data can be at root level (from bot) or in data object
+  nowPlaying?: NowPlaying | null;
+  queue?: QueueItem[];
+  history?: HistoryItem[];
+  status?: {
+    isPlaying: boolean;
+    isPaused: boolean;
+    volume: number;
+    loop: "off" | "track" | "queue" | string;
+    shuffle: boolean;
   };
 }
 
@@ -110,18 +109,28 @@ serve(async (req) => {
     // Broadcast to all connected clients via Supabase Realtime
     const channel = supabase.channel(`server:${payload.serverId}`);
     
+    // Build the broadcast payload from root-level properties
+    const broadcastPayload: Record<string, unknown> = {
+      serverId: payload.serverId,
+      timestamp: new Date().toISOString(),
+    };
+    
+    if (payload.nowPlaying !== undefined) broadcastPayload.nowPlaying = payload.nowPlaying;
+    if (payload.queue !== undefined) broadcastPayload.queue = payload.queue;
+    if (payload.history !== undefined) broadcastPayload.history = payload.history;
+    if (payload.status !== undefined) broadcastPayload.status = payload.status;
+    
+    // Subscribe first, then send
+    await channel.subscribe();
+    
     // Send the update through the channel
     await channel.send({
       type: "broadcast",
       event: payload.action,
-      payload: {
-        serverId: payload.serverId,
-        ...payload.data,
-        timestamp: new Date().toISOString(),
-      },
+      payload: broadcastPayload,
     });
 
-    console.log("Broadcast sent for action:", payload.action);
+    console.log("Broadcast sent for action:", payload.action, "payload:", broadcastPayload);
 
     return new Response(
       JSON.stringify({ 

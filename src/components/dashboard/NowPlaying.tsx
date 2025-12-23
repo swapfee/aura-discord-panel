@@ -8,42 +8,50 @@ import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
 const NowPlaying = () => {
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState([75]);
-  const [progress, setProgress] = useState([35]);
   const [isMuted, setIsMuted] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
   const [shuffleOn, setShuffleOn] = useState(false);
 
-  const currentTrack = {
-    title: "Blinding Lights",
-    artist: "The Weeknd",
-    album: "After Hours",
-    isPlaying: isPlaying,
-    duration: "3:20",
-    currentTime: "1:10",
-    cover: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop",
-  };
+  // null means nothing is playing
+  const currentTrack = null as {
+    title: string;
+    artist: string;
+    album: string;
+    duration: string;
+    currentTime: string;
+    cover: string;
+  } | null;
+
+  const progress = currentTrack ? [35] : [0];
 
   return (
     <div className="fixed bottom-0 left-16 lg:left-64 right-0 h-24 bg-card/95 backdrop-blur-2xl border-t border-border z-40 transition-all duration-300">
       <div className="h-full flex items-center px-4 gap-4">
         {/* Track Info */}
         <div className="flex items-center gap-4 w-1/4 min-w-0">
-          <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 shadow-lg">
-            <img 
-              src={currentTrack.cover} 
-              alt={currentTrack.album}
-              className="w-full h-full object-cover"
-            />
+          <div className={cn(
+            "w-14 h-14 rounded-lg overflow-hidden shrink-0 shadow-lg flex items-center justify-center",
+            !currentTrack && "bg-muted"
+          )}>
+            {currentTrack ? (
+              <img 
+                src={currentTrack.cover} 
+                alt={currentTrack.album}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <ListMusic className="w-6 h-6 text-muted-foreground" />
+            )}
           </div>
           <div className="min-w-0">
             <h4 className="text-sm font-medium text-foreground truncate">
-              {currentTrack.title}
+              {currentTrack?.title || "Nothing playing"}
             </h4>
             <p className="text-xs text-muted-foreground truncate">
-              {currentTrack.artist}
+              {currentTrack?.artist || "Play something to get started"}
             </p>
           </div>
           <Button 
@@ -51,6 +59,7 @@ const NowPlaying = () => {
             size="icon-sm"
             onClick={() => setIsLiked(!isLiked)}
             className={cn(isLiked && "text-primary")}
+            disabled={!currentTrack}
           >
             <Heart className={cn("w-4 h-4", isLiked && "fill-current")} />
           </Button>
@@ -105,17 +114,17 @@ const NowPlaying = () => {
           {/* Progress Bar */}
           <div className="w-full flex items-center gap-3">
             <span className="text-xs text-muted-foreground w-10 text-right">
-              {currentTrack.currentTime}
+              {currentTrack?.currentTime || "0:00"}
             </span>
             <Slider
               value={progress}
-              onValueChange={setProgress}
               max={100}
               step={1}
               className="flex-1"
+              disabled={!currentTrack}
             />
             <span className="text-xs text-muted-foreground w-10">
-              {currentTrack.duration}
+              {currentTrack?.duration || "0:00"}
             </span>
           </div>
         </div>

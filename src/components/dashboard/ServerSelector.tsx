@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Plus, Check, Users, ServerOff } from "lucide-react";
+import { ChevronDown, Plus, Check, Users, ServerOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,11 +10,19 @@ interface ServerSelectorProps {
 }
 
 const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorProps) => {
-  const { servers } = useAuth();
+  const { servers, refreshServers } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(
     servers.length > 0 ? servers[0].id : null
   );
+
+  const handleRefresh = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsRefreshing(true);
+    await refreshServers();
+    setIsRefreshing(false);
+  };
 
   const selectedServer = servers.find(s => s.id === selectedServerId) || servers[0];
 
@@ -107,6 +115,18 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
 
       {isOpen && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
+          <div className="p-2 border-b border-border flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Your Servers</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-6 px-2"
+            >
+              <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
+            </Button>
+          </div>
           <div className="p-2 space-y-1 max-h-64 overflow-y-auto">
             {servers.map((server) => (
               <div

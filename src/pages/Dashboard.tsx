@@ -20,7 +20,7 @@ import DashboardPlaylists from "@/components/dashboard/DashboardPlaylists";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import DashboardSettings from "@/components/dashboard/DashboardSettings";
 import NowPlaying from "@/components/dashboard/NowPlaying";
-import ServerSelector from "@/components/dashboard/ServerSelector";
+import ServerSelector, { Server } from "@/components/dashboard/ServerSelector";
 
 const navItems = [
   { id: "overview", label: "Overview", icon: Home },
@@ -31,9 +31,22 @@ const navItems = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
+// Demo servers - replace with real data from your bot API later
+const demoServers: Server[] = [
+  {
+    id: "1",
+    discord_server_id: "1403488603027279872",
+    server_name: "Revert Development",
+    server_icon: null,
+    member_count: 10,
+    bot_connected: true,
+  },
+];
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [servers] = useState<Server[]>(demoServers);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -72,12 +85,12 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Server selector – UI only */}
+        {/* Server selector */}
         <div className="p-3">
           <ServerSelector
-            servers={[]}
+            servers={servers}
             collapsed={!sidebarOpen}
-            onServerChange={() => {}}
+            onServerChange={(serverId) => console.log("Selected:", serverId)}
           />
         </div>
 

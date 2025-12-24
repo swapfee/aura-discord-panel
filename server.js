@@ -60,17 +60,23 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 /* ======================
    DISCORD AUTH
 ====================== */
-passport.use(
-  new DiscordStrategy(
-    {
-      clientId: DISCORD_CLIENT_ID,
-      clientSecret: DISCORD_CLIENT_SECRET,
-      callbackUrl: DISCORD_REDIRECT_URI,
-      scope: ["identify", "email"],
-    },
-    (_accessToken, _refreshToken, profile, done) => done(null, profile)
-  )
-);
+// server.js (Passport setup)
+passport.use(new DiscordStrategy(
+  {
+    clientID: process.env.DISCORD_CLIENT_ID,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET,
+    callbackURL: process.env.DISCORD_REDIRECT_URI,
+    scope: ['identify', 'email', 'guilds'] // ← add the 'guilds' scope
+  },
+  async function(accessToken, refreshToken, profile, cb) {
+    // save profile info and accessToken in JWT
+    const user = { id: profile.id, username: profile.username };
+    const tokenPayload = { user, accessToken };
+    const jwtToken = jwt.sign(tokenPayload, process.env.JWT_SECRET);
+    return cb(null, user, { jwt: jwtToken });
+  }
+));
+
 
 app.use(passport.initialize());
 
@@ -103,6 +109,41 @@ app.get("/api/me", async (req, res) => {
   if (!user) return res.status(401).json({ user: null });
   res.json({ user });
 });
+
+// server.js (add near other API routes)
+app.get('/api/servers', async (req, res) => {
+  // Decode user and token from JWT
+  const token = req.cookies['token'];
+  const { user, accessToken } = jwt.verify(token, process.env.JWT_SECRET);
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'No access token' });
+  }
+
+  try {
+    const guildsRes = await fetch('https://discord.com/api/users/@me/guilds?with_counts=true', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!guildsRes.ok) {
+      throw new Error('Failed to fetch guilds');
+    }
+    const guilds = await guildsRes.json();
+    // Map to the type expected by the frontend
+    const servers = guilds.map(g => ({
+      id: g.id,
+      discord_server_id: g.id,
+      server_name: g.name,
+      server_icon: g.icon,
+      member_count: g.approximate_member_count || 0,
+      bot_connected: false // you can compute this if your bot is already in that guild
+    }));
+    res.json({ servers });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not get servers' });
+  }
+});
+
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());

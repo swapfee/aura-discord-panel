@@ -1,227 +1,133 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  ChevronDown,
-  Check,
-  Users,
-  ServerOff,
-  RefreshCw,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+// src/components/dashboard/ServerSelector.tsx
+import { useEffect, useState } from "react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Server type definition
-export interface Server {
+type Server = {
   id: string;
   discord_server_id: string;
   server_name: string;
   server_icon?: string | null;
   member_count?: number;
   bot_connected?: boolean;
-}
+};
 
-interface ServerSelectorProps {
-  collapsed?: boolean;
-  onServerChange?: (serverId: string) => void;
+type ServerSelectorProps = {
   servers: Server[];
-  onRefresh?: () => Promise<void>;
-}
+  loading?: boolean;
+  collapsed?: boolean;
+  onServerChange: (serverId: string) => void;
+};
 
-const ServerSelector = ({
+export default function ServerSelector({
+  servers,
+  loading = false,
   collapsed = false,
   onServerChange,
-  servers,
-  onRefresh,
-}: ServerSelectorProps) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+}: ServerSelectorProps) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Server | null>(null);
 
-  const initializedRef = useRef(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  /* Auto-select first server */
+  // Auto-select first server when list loads
   useEffect(() => {
-    if (!servers.length) return;
-
-    const stillExists = servers.some(s => s.id === selectedServerId);
-
-    if (!initializedRef.current || !stillExists) {
-      const first = servers[0];
-      setSelectedServerId(first.id);
-      onServerChange?.(first.discord_server_id);
-      initializedRef.current = true;
+    if (!selected && servers.length > 0) {
+      setSelected(servers[0]);
+      onServerChange(servers[0].discord_server_id);
     }
-  }, [servers, selectedServerId, onServerChange]);
+  }, [servers, selected, onServerChange]);
 
-  /* Close dropdown on outside click */
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const handleRefresh = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!onRefresh) return;
-    setIsRefreshing(true);
-    await onRefresh();
-    setIsRefreshing(false);
+  const handleSelect = (server: Server) => {
+    setSelected(server);
+    onServerChange(server.discord_server_id);
+    setOpen(false);
   };
 
-  const selectedServer =
-    servers.find(s => s.id === selectedServerId) ?? servers[0];
-
-  const handleServerSelect = (server: Server) => {
-    setSelectedServerId(server.id);
-    setIsOpen(false);
-    onServerChange?.(server.discord_server_id);
-  };
-
-  /* No servers */
-  if (!servers.length) {
-    return (
-      <Button
-        variant="ghost"
-        size="icon"
-        className="w-full aspect-square"
-        disabled
-      >
-        <ServerOff className="w-5 h-5 text-muted-foreground" />
-      </Button>
-    );
-  }
-
-  /* Collapsed mode */
   if (collapsed) {
     return (
-      <Button
-        variant="ghost"
-        size="icon"
-        className="w-full aspect-square"
-        onClick={() => setIsOpen(o => !o)}
-      >
-        {selectedServer?.server_icon ? (
-          <img
-            src={selectedServer.server_icon}
-            alt={selectedServer.server_name}
-            className="w-6 h-6 rounded-md"
-          />
+      <div className="flex items-center justify-center h-10">
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
         ) : (
-          <span className="text-lg">🎵</span>
+          selected && (
+            <img
+              src={
+                selected.server_icon
+                  ? `https://cdn.discordapp.com/icons/${selected.discord_server_id}/${selected.server_icon}.png?size=32`
+                  : undefined
+              }
+              alt={selected.server_name}
+              className="w-8 h-8 rounded-full"
+            />
+          )
         )}
-      </Button>
+      </div>
     );
   }
 
-  /* Full selector */
   return (
-    <div ref={containerRef} className="relative">
-      <Button
-        variant="ghost"
-        className="w-full justify-between h-12 px-3"
-        onClick={() => setIsOpen(o => !o)}
+    <div className="relative">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md border bg-background"
+        onClick={() => setOpen((v) => !v)}
       >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center overflow-hidden">
-            {selectedServer?.server_icon ? (
-              <img
-                src={selectedServer.server_icon}
-                alt={selectedServer.server_name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-lg">🎵</span>
-            )}
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-medium truncate max-w-[140px]">
-              {selectedServer?.server_name}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {selectedServer?.member_count?.toLocaleString() ?? 0} members
-            </p>
-          </div>
-        </div>
-        <ChevronDown
-          className={cn(
-            "w-4 h-4 transition-transform",
-            isOpen && "rotate-180"
+        <div className="flex items-center gap-2 min-w-0">
+          {selected?.server_icon && (
+            <img
+              src={`https://cdn.discordapp.com/icons/${selected.discord_server_id}/${selected.server_icon}.png?size=32`}
+              alt={selected.server_name}
+              className="w-6 h-6 rounded-full"
+            />
           )}
-        />
-      </Button>
+          <span className="truncate text-sm">
+            {selected?.server_name || "Select server"}
+          </span>
+        </div>
 
-      {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-card border rounded-xl shadow-xl z-50">
-          <div className="p-2 border-b flex justify-between items-center">
-            <span className="text-xs text-muted-foreground">Your Servers</span>
-            {onRefresh && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-              >
-                <RefreshCw
-                  className={cn("w-3 h-3", isRefreshing && "animate-spin")}
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <ChevronDown className="w-4 h-4" />
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-md border bg-background shadow-lg max-h-64 overflow-auto">
+          {servers.map((server) => (
+            <button
+              key={server.id}
+              onClick={() => handleSelect(server)}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted",
+                selected?.id === server.id && "bg-muted"
+              )}
+            >
+              {server.server_icon && (
+                <img
+                  src={`https://cdn.discordapp.com/icons/${server.discord_server_id}/${server.server_icon}.png?size=32`}
+                  alt={server.server_name}
+                  className="w-6 h-6 rounded-full"
                 />
-              </Button>
-            )}
-          </div>
-
-          <div className="p-2 space-y-1 max-h-64 overflow-y-auto">
-            {servers.map(server => (
-              <div
-                key={server.id}
-                className={cn(
-                  "p-2 rounded-lg",
-                  server.id === selectedServerId
-                    ? "bg-primary/10 border border-primary/20"
-                    : "hover:bg-secondary"
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-sm">
+                  {server.server_name}
+                </div>
+                {typeof server.member_count === "number" && (
+                  <div className="text-xs text-muted-foreground">
+                    {server.member_count.toLocaleString()} members
+                  </div>
                 )}
-              >
-                <button
-                  onClick={() => handleServerSelect(server)}
-                  className="w-full flex items-center gap-3 text-left"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden">
-                    {server.server_icon ? (
-                      <img
-                        src={server.server_icon}
-                        alt={server.server_name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xl">🎵</span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate">{server.server_name}</p>
-                      {server.id === selectedServerId && (
-                        <Check className="w-4 h-4 text-primary" />
-                      )}
-                    </div>
-                    <div className="flex gap-2 text-xs text-muted-foreground">
-                      <Users className="w-3 h-3" />
-                      {server.member_count}
-                      <span>
-                        • {server.bot_connected ? "Connected" : "Not connected"}
-                      </span>
-                    </div>
-                  </div>
-                </button>
               </div>
-            ))}
-          </div>
+            </button>
+          ))}
+
+          {servers.length === 0 && !loading && (
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              No servers found
+            </div>
+          )}
         </div>
       )}
     </div>
   );
-};
-
-export default ServerSelector;
+}

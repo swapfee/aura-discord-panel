@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 
 export type AuthUser = {
-  id: string;
+  id: string; // Discord user id
   username: string;
   email?: string | null;
   avatar?: string | null;
@@ -12,16 +12,36 @@ type AuthContextType = {
   loading: boolean;
   signInWithDiscord: () => void;
   signOut: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function normalizeUser(raw: any): AuthUser | null {
+  if (!raw) return null;
+
+  // backend may return { sub, username, email, avatar } OR { id, ... }
+  const id = raw.id ?? raw.sub;
+  const username = raw.username;
+
+  if (!id || !username) return null;
+
+  return {
+    id: String(id),
+    username: String(username),
+    email: raw.email ?? null,
+    avatar: raw.avatar ?? null,
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
+
     try {
       const r = await fetch("/api/me", { credentials: "include" });
       if (!r.ok) {
@@ -29,32 +49,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = await r.json();
-      setUser(data.user ?? null);
+      setUser(normalizeUser(data.user));
     } catch {
+      setUser(null);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // initial load
+    refreshUser({ silent: false });
+  }, [refreshUser]);
+
+  const signInWithDiscord = () => {
+    // same-origin auth route served by your express server
+    window.location.assign("/auth/discord");
+  };
+
+  const signOut = async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
       setUser(null);
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await refreshUser();
-      setLoading(false);
-    })();
-  }, []);
-
-  const signInWithDiscord = () => {
-    window.location.href = "/auth/discord";
-  };
-
-  const signOut = async () => {
-    await fetch("/auth/logout", { method: "POST", credentials: "include" });
-    setUser(null);
-  };
-
   const value = useMemo(
     () => ({ user, loading, signInWithDiscord, signOut, refreshUser }),
-    [user, loading]
+    [user, loading, signInWithDiscord, signOut, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

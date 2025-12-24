@@ -19,13 +19,11 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <BotProvider>
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </BotProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

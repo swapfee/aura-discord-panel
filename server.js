@@ -63,9 +63,9 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 // server.js (Passport setup)
 passport.use(new DiscordStrategy(
   {
-    clientID: process.env.DISCORD_CLIENT_ID,
+    clientId: process.env.DISCORD_CLIENT_ID,
     clientSecret: process.env.DISCORD_CLIENT_SECRET,
-    callbackURL: process.env.DISCORD_REDIRECT_URI,
+    callbackUrl: process.env.DISCORD_REDIRECT_URI,
     scope: ['identify', 'email', 'guilds'] // ← add the 'guilds' scope
   },
   async function(accessToken, refreshToken, profile, cb) {

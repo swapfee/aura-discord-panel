@@ -42,20 +42,18 @@ if (!TOKEN_ENC_KEY) {
 }
 
 const pool = new Pool({ connectionString: DATABASE_URL });
-
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 
 function cookieOpts() {
   return {
     httpOnly: true,
-    secure: true, // Railway + HTTPS
+    secure: true,
     sameSite: "lax",
     path: "/",
   };
 }
 
 function encKeyBytes() {
-  // Accept base64 (preferred) or hex.
   const s = TOKEN_ENC_KEY.trim();
   if (/^[0-9a-fA-F]{64}$/.test(s)) return Buffer.from(s, "hex");
   return Buffer.from(s, "base64");
@@ -72,7 +70,6 @@ function encryptText(plain) {
   const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
   const ciphertext = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
-  // Store as base64 "iv.tag.ciphertext"
   return `${iv.toString("base64")}.${tag.toString("base64")}.${ciphertext.toString("base64")}`;
 }
 function decryptText(enc) {
@@ -92,24 +89,16 @@ async function requireUser(req) {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, JWT_KEY);
-    return payload; // { sub, username, email, avatar, ... }
+    return payload;
   } catch {
     return null;
   }
 }
 
-async function upsertDiscordTokens({
-  userId,
-  accessToken,
-  refreshToken,
-  expiresAtISO,
-  scope,
-  tokenType,
-}) {
+async function upsertDiscordTokens({ userId, accessToken, refreshToken, expiresAtISO, scope, tokenType }) {
   const accessEnc = encryptText(accessToken);
   const refreshEnc = encryptText(refreshToken);
 
-  // Your Railway UI created these as TEXT columns; we store ISO strings.
   await pool.query(
     `
     INSERT INTO discord_oauth_tokens
@@ -125,7 +114,7 @@ async function upsertDiscordTokens({
       token_type        = EXCLUDED.token_type,
       updated_at        = NOW()::text
     `,
-    [userId, accessEnc, refreshEnc, expiresAtISO, scope ?? null, tokenType ?? null]
+    [userId, accessEnc, refreshEnc, expiresAtISO ?? null, scope ?? null, tokenType ?? null]
   );
 }
 
@@ -143,16 +132,10 @@ async function getDiscordTokens(userId) {
     userId: row.user_id,
     accessToken: decryptText(row.access_token_enc),
     refreshToken: decryptText(row.refresh_token_enc),
-    expiresAtISO: row.expires_at, // ISO string (TEXT)
+    expiresAtISO: row.expires_at ?? null,
     scope: row.scope ?? null,
     tokenType: row.token_type ?? null,
   };
-}
-
-function isExpired(expiresAtISO, skewMs = 60_000) {
-  const t = Date.parse(expiresAtISO);
-  if (!Number.isFinite(t)) return true;
-  return Date.now() + skewMs >= t;
 }
 
 async function refreshDiscordAccessToken(refreshToken) {
@@ -176,13 +159,14 @@ async function refreshDiscordAccessToken(refreshToken) {
     throw new Error(msg);
   }
 
-  const now = Date.now();
   const expiresInSec = Number(data.expires_in ?? 0);
-  const expiresAtISO = new Date(now + expiresInSec * 1000).toISOString();
+  const expiresAtISO = expiresInSec
+    ? new Date(Date.now() + expiresInSec * 1000).toISOString()
+    : null;
 
   return {
     accessToken: data.access_token,
-    refreshToken: data.refresh_token || refreshToken, // Discord may rotate refresh tokens
+    refreshToken: data.refresh_token || refreshToken,
     expiresAtISO,
     scope: data.scope ?? null,
     tokenType: data.token_type ?? null,
@@ -203,12 +187,10 @@ passport.use(
       clientId: DISCORD_CLIENT_ID,
       clientSecret: DISCORD_CLIENT_SECRET,
       callbackUrl: DISCORD_REDIRECT_URI,
-      // NOTE: "guilds" is the key scope for listing guilds a user is in.
       scope: ["identify", "email", "guilds"],
     },
     async (accessToken, refreshToken, profile, cb) => {
       try {
-        // profile is provided by passport-discord-auth
         const user = {
           id: profile.id,
           username: profile.username,
@@ -216,8 +198,7 @@ passport.use(
           avatar: profile.avatar ?? null,
         };
 
-        // We do NOT create a JWT here. We pass tokens forward to the callback route
-        // using "info" so we can store them in Postgres.
+        // pass tokens via authInfo; store in callback
         return cb(null, user, { accessToken, refreshToken });
       } catch (e) {
         return cb(e);
@@ -235,27 +216,21 @@ app.get(
   passport.authenticate("discord", { session: false, failureRedirect: "/" }),
   async (req, res) => {
     try {
-      const user = req.user; // from strategy above
-      const info = req.authInfo || {}; // { accessToken, refreshToken }
+      const user = req.user;
+      const info = req.authInfo || {};
 
-      // Store Discord tokens in Postgres
-      const expiresAtISO = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // fallback
-      // NOTE: passport-discord-auth doesn't always give expires_in here;
-      // you can keep this fallback, and refresh will still work when needed.
-      // (If your strategy provides expires_in, set expiresAtISO from it.)
-
+      // Store tokens (expiresAt unknown here; we refresh on 401 anyway)
       if (info.accessToken && info.refreshToken) {
         await upsertDiscordTokens({
           userId: user.id,
           accessToken: info.accessToken,
           refreshToken: info.refreshToken,
-          expiresAtISO,
+          expiresAtISO: null,
           scope: "identify email guilds",
           tokenType: "Bearer",
         });
       }
 
-      // Create session cookie JWT (JOSE)
       const sessionJwt = await new SignJWT({
         username: user.username,
         email: user.email ?? null,
@@ -294,7 +269,6 @@ app.post("/api/account/delete", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).json({ ok: false, error: "Not authenticated" });
 
-  // Optional: also delete stored tokens
   try {
     await pool.query(`DELETE FROM discord_oauth_tokens WHERE user_id = $1`, [user.sub]);
   } catch (e) {
@@ -308,20 +282,30 @@ app.post("/api/account/delete", async (req, res) => {
 /* ======================
    SERVERS (Guilds list)
 ====================== */
+async function fetchGuildsWithToken(accessToken) {
+  const r = await fetch("https://discord.com/api/users/@me/guilds", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const data = await r.json().catch(() => null);
+  return { ok: r.ok, status: r.status, data };
+}
+
 app.get("/api/servers", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).json({ servers: [] });
 
   try {
     let tokens = await getDiscordTokens(user.sub);
-    if (!tokens) {
-      // No tokens stored yet (user authenticated but we didn't save tokens)
-      return res.json({ servers: [] });
-    }
+    if (!tokens) return res.json({ servers: [] });
 
-    // Refresh if expired/unknown
-    if (!tokens.expiresAtISO || isExpired(tokens.expiresAtISO)) {
+    // Try once with current token
+    let guildsRes = await fetchGuildsWithToken(tokens.accessToken);
+
+    // If unauthorized, refresh and retry once
+    if (guildsRes.status === 401) {
       const refreshed = await refreshDiscordAccessToken(tokens.refreshToken);
+
       await upsertDiscordTokens({
         userId: user.sub,
         accessToken: refreshed.accessToken,
@@ -330,38 +314,29 @@ app.get("/api/servers", async (req, res) => {
         scope: refreshed.scope,
         tokenType: refreshed.tokenType,
       });
+
       tokens = { ...tokens, ...refreshed };
+      guildsRes = await fetchGuildsWithToken(tokens.accessToken);
     }
 
-    // Fetch user's guilds
-    const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
-      headers: { Authorization: `Bearer ${tokens.accessToken}` },
-    });
-
-    if (!guildsRes.ok) {
-      const txt = await guildsRes.text().catch(() => "");
-      console.error("Discord guilds fetch failed:", guildsRes.status, txt);
+    if (!guildsRes.ok || !Array.isArray(guildsRes.data)) {
+      console.error("Discord guilds fetch failed:", guildsRes.status, guildsRes.data);
       return res.json({ servers: [] });
     }
 
-    const guilds = await guildsRes.json();
-
-    // IMPORTANT:
-    // /users/@me/guilds does NOT reliably provide member counts.
-    // We'll return member_count as null (or 0) for now.
-    const servers = (Array.isArray(guilds) ? guilds : []).map((g) => ({
+    const servers = guildsRes.data.map((g) => ({
       id: String(g.id),
       discord_server_id: String(g.id),
       server_name: g.name,
       server_icon: g.icon ?? null,
-      member_count: null, // needs bot-based fetch or privileged endpoints
-      bot_connected: null, // you can compute this later from your bot
+      member_count: null,      // not available from this endpoint
+      bot_connected: null,     // compute later using bot
     }));
 
-    res.json({ servers });
+    return res.json({ servers });
   } catch (e) {
     console.error("/api/servers error:", e);
-    res.status(500).json({ servers: [] });
+    return res.status(500).json({ servers: [] });
   }
 });
 

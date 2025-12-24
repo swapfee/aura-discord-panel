@@ -1,6 +1,5 @@
 // src/pages/Dashboard.tsx
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import {
   Home,
   ListMusic,
@@ -9,14 +8,10 @@ import {
   Sliders,
   Settings,
   Menu,
-  LogOut,
-  Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/contexts/AuthContext";
-import { useBot } from "@/contexts/BotContext";
 
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import DashboardQueue from "@/components/dashboard/DashboardQueue";
@@ -37,38 +32,8 @@ const navItems = [
 ];
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const { user, loading, signOut } = useAuth();
-  const { setCurrentServerId } = useBot();
-
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  // Redirect if logged out
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate("/");
-    }
-  }, [loading, user, navigate]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
-
-  const handleServerChange = (serverId: string) => {
-    setCurrentServerId(serverId);
-  };
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate("/");
-  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -87,14 +52,6 @@ export default function Dashboard() {
     }
   };
 
-  const username =
-    user?.global_name ||
-    user?.username ||
-    "User";
-
-  const avatarUrl =
-    user?.avatar_url || null;
-
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
@@ -104,7 +61,6 @@ export default function Dashboard() {
           sidebarOpen ? "w-64" : "w-16"
         )}
       >
-        {/* Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b">
           {sidebarOpen && <span className="font-bold">SoundWave</span>}
           <Button
@@ -116,16 +72,15 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Server selector (SAFE EMPTY STATE) */}
+        {/* Server selector – UI only */}
         <div className="p-3">
           <ServerSelector
             servers={[]}
             collapsed={!sidebarOpen}
-            onServerChange={handleServerChange}
+            onServerChange={() => {}}
           />
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1">
           {navItems.map((item) => (
             <Button
@@ -140,33 +95,12 @@ export default function Dashboard() {
           ))}
         </nav>
 
-        {/* User */}
         <div className="p-3 border-t">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden">
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={username}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-sm font-medium text-primary">
-                    {username.charAt(0)}
-                  </span>
-                )}
-              </div>
-              {sidebarOpen && (
-                <span className="truncate text-sm">{username}</span>
-              )}
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+              U
             </div>
-
-            {sidebarOpen && (
-              <Button variant="ghost" size="icon" onClick={handleSignOut}>
-                <LogOut className="w-4 h-4" />
-              </Button>
-            )}
+            {sidebarOpen && <span>User</span>}
           </div>
         </div>
       </aside>

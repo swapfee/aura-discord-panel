@@ -4,7 +4,6 @@ import { Trash2, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -21,13 +20,17 @@ import { Input } from "@/components/ui/input";
 
 const DashboardSettings = () => {
   const navigate = useNavigate();
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const { toast } = useToast();
+
   const [confirmText, setConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const username = profile?.discord_username || "your account";
+  // Works with the new auth shape: user from /api/me
+  const username = user?.username || "your account";
+  const userId = user?.id || "N/A";
+  const email = (user as any)?.email ?? "N/A";
 
   const handleDeleteAccount = async () => {
     if (confirmText !== "DELETE") {
@@ -42,28 +45,40 @@ const DashboardSettings = () => {
     setIsDeleting(true);
 
     try {
-      // Delete user's servers first
-      const { error: serversError } = await supabase
-        .from("user_servers")
-        .delete()
-        .eq("user_id", user?.id);
+      // One backend endpoint to delete everything on the server side
+      // You should implement this in server.js:
+      // POST /api/account/delete  -> { ok: true }
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
 
-      if (serversError) {
-        console.error("Error deleting servers:", serversError);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("Delete account failed:", res.status, text);
+        toast({
+          title: "Error",
+          description:
+            res.status === 404
+              ? "Account deletion endpoint is not implemented yet (POST /api/account/delete)."
+              : `Failed to delete your account (${res.status}).`,
+          variant: "destructive",
+        });
+        return;
       }
 
-      // Delete user's profile
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", user?.id);
-
-      if (profileError) {
-        console.error("Error deleting profile:", profileError);
-        throw profileError;
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok === false) {
+        toast({
+          title: "Error",
+          description: data?.error || "Failed to delete your account.",
+          variant: "destructive",
+        });
+        return;
       }
 
-      // Sign out the user
+      // Clear session cookie + local state
       await signOut();
 
       toast({
@@ -82,6 +97,7 @@ const DashboardSettings = () => {
     } finally {
       setIsDeleting(false);
       setDialogOpen(false);
+      setConfirmText("");
     }
   };
 
@@ -95,7 +111,7 @@ const DashboardSettings = () => {
       {/* Account Section */}
       <Card className="p-6">
         <h2 className="text-lg font-semibold text-foreground mb-4">Account</h2>
-        
+
         <div className="space-y-4">
           <div className="flex items-center justify-between py-3 border-b border-border">
             <div>
@@ -103,11 +119,18 @@ const DashboardSettings = () => {
               <p className="text-sm text-muted-foreground">{username}</p>
             </div>
           </div>
-          
+
           <div className="flex items-center justify-between py-3 border-b border-border">
             <div>
               <p className="font-medium text-foreground">Discord ID</p>
-              <p className="text-sm text-muted-foreground">{profile?.discord_id || "N/A"}</p>
+              <p className="text-sm text-muted-foreground">{userId}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between py-3">
+            <div>
+              <p className="font-medium text-foreground">Email</p>
+              <p className="text-sm text-muted-foreground">{email}</p>
             </div>
           </div>
         </div>
@@ -119,10 +142,10 @@ const DashboardSettings = () => {
           <AlertTriangle className="w-5 h-5 text-destructive" />
           <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
         </div>
-        
+
         <p className="text-sm text-muted-foreground mb-4">
-          Once you delete your account, there is no going back. This will permanently delete your 
-          profile, server connections, and all associated data.
+          Once you delete your account, there is no going back. This will permanently delete your
+          account and associated data.
         </p>
 
         <AlertDialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -132,14 +155,16 @@ const DashboardSettings = () => {
               Delete Account
             </Button>
           </AlertDialogTrigger>
+
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
               <AlertDialogDescription className="space-y-4">
                 <p>
-                  This action cannot be undone. This will permanently delete your account 
-                  and remove all your data from our servers.
+                  This action cannot be undone. This will permanently delete your account and remove
+                  all your data from our servers.
                 </p>
+
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-foreground">
                     Type <span className="font-mono bg-muted px-1 rounded">DELETE</span> to confirm:
@@ -153,6 +178,7 @@ const DashboardSettings = () => {
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
+
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setConfirmText("")}>Cancel</AlertDialogCancel>
               <AlertDialogAction

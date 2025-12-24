@@ -111,7 +111,7 @@ app.get("/api/me", async (req, res) => {
 });
 
 // server.js (add near other API routes)
-aapp.get("/api/servers", async (req, res) => {
+app.get("/api/servers", async (req, res) => {
   const token = req.cookies.session;
   if (!token) {
     return res.status(401).json({ servers: [] });

@@ -8,7 +8,6 @@ import { BotProvider } from "@/contexts/BotContext";
 
 import LandingPage from "./pages/LandingPage";
 import Dashboard from "./pages/Dashboard";
-import AuthCallback from "./pages/AuthCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,7 +24,6 @@ const App = () => (
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BotProvider>

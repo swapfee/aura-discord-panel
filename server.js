@@ -1,3 +1,4 @@
+// server.js (ESM) — Express + Discord OAuth + Postgres token storage + JOSE JWT sessions
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -5,6 +6,10 @@ import cookieParser from "cookie-parser";
 import passport from "passport";
 import { Strategy as DiscordStrategy } from "passport-discord-auth";
 import { SignJWT, jwtVerify } from "jose";
+import pg from "pg";
+import crypto from "crypto";
+
+const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,38 +23,170 @@ const {
   DISCORD_CLIENT_SECRET,
   DISCORD_REDIRECT_URI,
   JWT_SECRET,
+  DATABASE_URL,
+  TOKEN_ENC_KEY, // REQUIRED: 32-byte key, base64 (recommended) or 64 hex chars
   PORT,
-  // Optional: if you later want to forward commands to a bot service
-  BOT_API_URL,
-  BOT_API_KEY,
 } = process.env;
 
 if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI || !JWT_SECRET) {
-  console.error("Missing required env vars");
+  console.error("Missing required env vars: DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI, JWT_SECRET");
   process.exit(1);
 }
+if (!DATABASE_URL) {
+  console.error("Missing required env var: DATABASE_URL (Railway Postgres connection string)");
+  process.exit(1);
+}
+if (!TOKEN_ENC_KEY) {
+  console.error("Missing required env var: TOKEN_ENC_KEY (32-byte key, base64 recommended)");
+  process.exit(1);
+}
+
+const pool = new Pool({ connectionString: DATABASE_URL });
 
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 
 function cookieOpts() {
   return {
     httpOnly: true,
-    secure: true,
+    secure: true, // Railway + HTTPS
     sameSite: "lax",
     path: "/",
   };
 }
 
-async function requireUser(req, res) {
+function encKeyBytes() {
+  // Accept base64 (preferred) or hex.
+  const s = TOKEN_ENC_KEY.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(s)) return Buffer.from(s, "hex");
+  return Buffer.from(s, "base64");
+}
+const ENC_KEY = encKeyBytes();
+if (ENC_KEY.length !== 32) {
+  console.error("TOKEN_ENC_KEY must decode to 32 bytes (AES-256-GCM key).");
+  process.exit(1);
+}
+
+// AES-256-GCM encrypt/decrypt for storing tokens in DB
+function encryptText(plain) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
+  const ciphertext = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // Store as base64 "iv.tag.ciphertext"
+  return `${iv.toString("base64")}.${tag.toString("base64")}.${ciphertext.toString("base64")}`;
+}
+function decryptText(enc) {
+  const [ivB64, tagB64, dataB64] = String(enc).split(".");
+  if (!ivB64 || !tagB64 || !dataB64) throw new Error("Bad encrypted payload format");
+  const iv = Buffer.from(ivB64, "base64");
+  const tag = Buffer.from(tagB64, "base64");
+  const data = Buffer.from(dataB64, "base64");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", ENC_KEY, iv);
+  decipher.setAuthTag(tag);
+  const plain = Buffer.concat([decipher.update(data), decipher.final()]);
+  return plain.toString("utf8");
+}
+
+async function requireUser(req) {
   const token = req.cookies.session;
   if (!token) return null;
-
   try {
     const { payload } = await jwtVerify(token, JWT_KEY);
-    return payload; // includes sub, username, email, avatar, etc
+    return payload; // { sub, username, email, avatar, ... }
   } catch {
     return null;
   }
+}
+
+async function upsertDiscordTokens({
+  userId,
+  accessToken,
+  refreshToken,
+  expiresAtISO,
+  scope,
+  tokenType,
+}) {
+  const accessEnc = encryptText(accessToken);
+  const refreshEnc = encryptText(refreshToken);
+
+  // Your Railway UI created these as TEXT columns; we store ISO strings.
+  await pool.query(
+    `
+    INSERT INTO discord_oauth_tokens
+      (user_id, access_token_enc, refresh_token_enc, expires_at, scope, token_type, updated_at)
+    VALUES
+      ($1, $2, $3, $4, $5, $6, NOW()::text)
+    ON CONFLICT (user_id)
+    DO UPDATE SET
+      access_token_enc = EXCLUDED.access_token_enc,
+      refresh_token_enc = EXCLUDED.refresh_token_enc,
+      expires_at        = EXCLUDED.expires_at,
+      scope             = EXCLUDED.scope,
+      token_type        = EXCLUDED.token_type,
+      updated_at        = NOW()::text
+    `,
+    [userId, accessEnc, refreshEnc, expiresAtISO, scope ?? null, tokenType ?? null]
+  );
+}
+
+async function getDiscordTokens(userId) {
+  const { rows } = await pool.query(
+    `SELECT user_id, access_token_enc, refresh_token_enc, expires_at, scope, token_type
+     FROM discord_oauth_tokens
+     WHERE user_id = $1`,
+    [userId]
+  );
+  if (!rows.length) return null;
+
+  const row = rows[0];
+  return {
+    userId: row.user_id,
+    accessToken: decryptText(row.access_token_enc),
+    refreshToken: decryptText(row.refresh_token_enc),
+    expiresAtISO: row.expires_at, // ISO string (TEXT)
+    scope: row.scope ?? null,
+    tokenType: row.token_type ?? null,
+  };
+}
+
+function isExpired(expiresAtISO, skewMs = 60_000) {
+  const t = Date.parse(expiresAtISO);
+  if (!Number.isFinite(t)) return true;
+  return Date.now() + skewMs >= t;
+}
+
+async function refreshDiscordAccessToken(refreshToken) {
+  const body = new URLSearchParams({
+    client_id: DISCORD_CLIENT_ID,
+    client_secret: DISCORD_CLIENT_SECRET,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    redirect_uri: DISCORD_REDIRECT_URI,
+  });
+
+  const r = await fetch("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = data?.error_description || data?.error || `Refresh failed (${r.status})`;
+    throw new Error(msg);
+  }
+
+  const now = Date.now();
+  const expiresInSec = Number(data.expires_in ?? 0);
+  const expiresAtISO = new Date(now + expiresInSec * 1000).toISOString();
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || refreshToken, // Discord may rotate refresh tokens
+    expiresAtISO,
+    scope: data.scope ?? null,
+    tokenType: data.token_type ?? null,
+  };
 }
 
 /* ======================
@@ -58,33 +195,36 @@ async function requireUser(req, res) {
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 /* ======================
-   DISCORD AUTH
+   DISCORD AUTH (Passport)
 ====================== */
-// server.js (Passport setup)
 passport.use(
   new DiscordStrategy(
     {
-      clientId: DISCORD_CLIENT_ID,
+      clientID: DISCORD_CLIENT_ID,
       clientSecret: DISCORD_CLIENT_SECRET,
-      callbackUrl: DISCORD_REDIRECT_URI,
+      callbackURL: DISCORD_REDIRECT_URI,
+      // NOTE: "guilds" is the key scope for listing guilds a user is in.
       scope: ["identify", "email", "guilds"],
     },
-    async (accessToken, refreshToken, profile, done) => {
-      // Passport should ONLY authenticate the user
-      const user = {
-        id: profile.id,
-        username: profile.username,
-        email: profile.email ?? null,
-        avatar: profile.avatar ?? null,
-      };
+    async (accessToken, refreshToken, profile, cb) => {
+      try {
+        // profile is provided by passport-discord-auth
+        const user = {
+          id: profile.id,
+          username: profile.username,
+          email: profile.email ?? null,
+          avatar: profile.avatar ?? null,
+        };
 
-      // We DO NOT issue JWTs here
-      return done(null, user);
+        // We do NOT create a JWT here. We pass tokens forward to the callback route
+        // using "info" so we can store them in Postgres.
+        return cb(null, user, { accessToken, refreshToken });
+      } catch (e) {
+        return cb(e);
+      }
     }
   )
 );
-
-
 
 app.use(passport.initialize());
 
@@ -94,151 +234,154 @@ app.get(
   "/auth/discord/callback",
   passport.authenticate("discord", { session: false, failureRedirect: "/" }),
   async (req, res) => {
-    const user = req.user;
+    try {
+      const user = req.user; // from strategy above
+      const info = req.authInfo || {}; // { accessToken, refreshToken }
 
-    const jwt = await new SignJWT({
-      username: user.username,
-      email: user.email,
-      avatar: user.avatar,
-    })
-      .setProtectedHeader({ alg: "HS256" })
-      .setSubject(user.id)
-      .setIssuedAt()
-      .setExpirationTime("2h")
-      .sign(JWT_KEY);
+      // Store Discord tokens in Postgres
+      const expiresAtISO = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // fallback
+      // NOTE: passport-discord-auth doesn't always give expires_in here;
+      // you can keep this fallback, and refresh will still work when needed.
+      // (If your strategy provides expires_in, set expiresAtISO from it.)
 
-    res.cookie("session", jwt, {
-      ...cookieOpts(),
-      maxAge: 2 * 60 * 60 * 1000,
-    });
+      if (info.accessToken && info.refreshToken) {
+        await upsertDiscordTokens({
+          userId: user.id,
+          accessToken: info.accessToken,
+          refreshToken: info.refreshToken,
+          expiresAtISO,
+          scope: "identify email guilds",
+          tokenType: "Bearer",
+        });
+      }
 
-    res.redirect("/dashboard");
+      // Create session cookie JWT (JOSE)
+      const sessionJwt = await new SignJWT({
+        username: user.username,
+        email: user.email ?? null,
+        avatar: user.avatar ?? null,
+      })
+        .setProtectedHeader({ alg: "HS256" })
+        .setSubject(user.id)
+        .setIssuedAt()
+        .setExpirationTime("2h")
+        .sign(JWT_KEY);
+
+      res.cookie("session", sessionJwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
+      res.redirect("/dashboard");
+    } catch (e) {
+      console.error("OAuth callback error:", e);
+      res.redirect("/");
+    }
   }
 );
 
-
+/* ======================
+   ACCOUNT
+====================== */
 app.get("/api/me", async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req);
   if (!user) return res.status(401).json({ user: null });
   res.json({ user });
 });
-
-// server.js (add near other API routes)
-app.get("/api/servers", async (req, res) => {
-  const token = req.cookies.session;
-  if (!token) {
-    return res.status(401).json({ servers: [] });
-  }
-
-  let payload;
-  try {
-    const verified = await jwtVerify(token, JWT_KEY);
-    payload = verified.payload;
-  } catch {
-    return res.status(401).json({ servers: [] });
-  }
-
-  /**
-   * IMPORTANT:
-   * Your JWT currently does NOT store a Discord access token.
-   * Until you add that, we return a safe demo server so the UI works.
-   * This prevents crashes and keeps contracts stable.
-   */
-
-  const servers = [
-    {
-      id: "demo-server",
-      discord_server_id: "demo-server",
-      server_name: "Demo Server",
-      server_icon: null,
-      member_count: 42,
-      bot_connected: true,
-    },
-  ];
-
-  return res.json({ servers });
-});
-
-
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());
   res.status(204).end();
 });
 
-/* ======================
-   ACCOUNT
-====================== */
-/**
- * Since we currently don't have a DB, "delete account" = clear auth cookie.
- * Later: delete user data from DB, revoke tokens, etc.
- */
 app.post("/api/account/delete", async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req);
   if (!user) return res.status(401).json({ ok: false, error: "Not authenticated" });
 
-  // TODO (later): delete user data from your DB here
-  // For now, just log out.
+  // Optional: also delete stored tokens
+  try {
+    await pool.query(`DELETE FROM discord_oauth_tokens WHERE user_id = $1`, [user.sub]);
+  } catch (e) {
+    console.error("Delete tokens failed:", e);
+  }
+
   res.clearCookie("session", cookieOpts());
   res.json({ ok: true });
 });
 
 /* ======================
-   BOT COMMANDS (NO SUPABASE)
+   SERVERS (Guilds list)
 ====================== */
-/**
- * Frontend calls this from BotContext:
- * POST /api/bot/command
- * body: { command, serverId, data }
- *
- * For now this endpoint just returns ok:true so your UI can function.
- * Later you can wire it to your actual Discord bot process.
- */
+app.get("/api/servers", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).json({ servers: [] });
+
+  try {
+    let tokens = await getDiscordTokens(user.sub);
+    if (!tokens) {
+      // No tokens stored yet (user authenticated but we didn't save tokens)
+      return res.json({ servers: [] });
+    }
+
+    // Refresh if expired/unknown
+    if (!tokens.expiresAtISO || isExpired(tokens.expiresAtISO)) {
+      const refreshed = await refreshDiscordAccessToken(tokens.refreshToken);
+      await upsertDiscordTokens({
+        userId: user.sub,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAtISO: refreshed.expiresAtISO,
+        scope: refreshed.scope,
+        tokenType: refreshed.tokenType,
+      });
+      tokens = { ...tokens, ...refreshed };
+    }
+
+    // Fetch user's guilds
+    const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    });
+
+    if (!guildsRes.ok) {
+      const txt = await guildsRes.text().catch(() => "");
+      console.error("Discord guilds fetch failed:", guildsRes.status, txt);
+      return res.json({ servers: [] });
+    }
+
+    const guilds = await guildsRes.json();
+
+    // IMPORTANT:
+    // /users/@me/guilds does NOT reliably provide member counts.
+    // We'll return member_count as null (or 0) for now.
+    const servers = (Array.isArray(guilds) ? guilds : []).map((g) => ({
+      id: String(g.id),
+      discord_server_id: String(g.id),
+      server_name: g.name,
+      server_icon: g.icon ?? null,
+      member_count: null, // needs bot-based fetch or privileged endpoints
+      bot_connected: null, // you can compute this later from your bot
+    }));
+
+    res.json({ servers });
+  } catch (e) {
+    console.error("/api/servers error:", e);
+    res.status(500).json({ servers: [] });
+  }
+});
+
+/* ======================
+   BOT COMMANDS (stub)
+====================== */
 app.post("/api/bot/command", async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req);
   if (!user) return res.status(401).json({ ok: false, error: "Not authenticated" });
 
-  const { command, serverId, data } = req.body || {};
+  const { command, serverId, payload } = req.body || {};
   if (!command || !serverId) {
     return res.status(400).json({ ok: false, error: "Missing command or serverId" });
   }
 
-  // If you have a separate bot service, forward it:
-  // (optional) set BOT_API_URL and BOT_API_KEY in Railway
-  if (BOT_API_URL) {
-    try {
-      const r = await fetch(`${BOT_API_URL}/command`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(BOT_API_KEY ? { Authorization: `Bearer ${BOT_API_KEY}` } : {}),
-        },
-        body: JSON.stringify({
-          userId: user.sub,
-          serverId,
-          command,
-          data: data ?? {},
-        }),
-      });
-
-      if (!r.ok) {
-        const text = await r.text().catch(() => "");
-        return res.status(502).json({ ok: false, error: `Bot API error (${r.status})`, details: text });
-      }
-
-      const json = await r.json().catch(() => ({}));
-      return res.json({ ok: true, result: json });
-    } catch (e) {
-      return res.status(502).json({ ok: false, error: "Bot API request failed" });
-    }
-  }
-
-  // Default stub behavior (no bot wired yet)
   console.log("[bot-command]", {
     userId: user.sub,
     serverId,
     command,
-    data: data ?? {},
+    payload: payload ?? {},
   });
 
   return res.json({ ok: true });
@@ -250,7 +393,6 @@ app.post("/api/bot/command", async (req, res) => {
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-// React Router fallback
 app.get("*", (_req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });

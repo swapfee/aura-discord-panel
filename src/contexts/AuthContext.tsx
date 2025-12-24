@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  ReactNode,
+  useCallback,
+} from "react";
 
 export type AuthUser = {
   id: string;
@@ -37,25 +45,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent ?? false;
-    if (!silent) setLoading(true);
+  const refreshUser = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent ?? false;
+      if (!silent) setLoading(true);
 
-    try {
-      const r = await fetch("/api/me", { credentials: "include" });
-      if (!r.ok) {
+      try {
+        const r = await fetch("/api/me", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        // ❗ Not authenticated
+        if (r.status === 401 || r.status === 403) {
+          setUser(null);
+          return;
+        }
+
+        // ❗ 304 = no body, do NOT parse JSON
+        if (r.status === 304) {
+          return;
+        }
+
+        if (!r.ok) {
+          setUser(null);
+          return;
+        }
+
+        const data = await r.json();
+        setUser(normalizeUser(data?.user));
+      } catch {
         setUser(null);
-        return;
+      } finally {
+        if (!silent) setLoading(false);
       }
-      const data = await r.json();
-      setUser(normalizeUser(data.user));
-    } catch {
-      setUser(null);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
+  // Initial auth check
   useEffect(() => {
     refreshUser({ silent: false });
   }, [refreshUser]);
@@ -66,14 +94,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      await fetch("/auth/logout", { method: "POST", credentials: "include" });
+      await fetch("/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
     } finally {
       setUser(null);
     }
   };
 
   const value = useMemo(
-    () => ({ user, loading, signInWithDiscord, signOut, refreshUser }),
+    () => ({
+      user,
+      loading,
+      signInWithDiscord,
+      signOut,
+      refreshUser,
+    }),
     [user, loading, refreshUser]
   );
 
@@ -82,6 +119,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  if (!ctx) {
+    throw new Error("useAuth must be used within AuthProvider");
+  }
   return ctx;
 }

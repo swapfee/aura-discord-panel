@@ -1,36 +1,56 @@
-import { useState, useEffect } from "react";
+// src/components/dashboard/NowPlaying.tsx
+import { useState } from "react";
 import {
-  Play, Pause, SkipBack, SkipForward,
-  Volume2, VolumeX, Repeat, Shuffle,
-  Heart, Maximize2, ListMusic, Loader2
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+  Repeat,
+  Shuffle,
+  Heart,
+  ListMusic,
+  Loader2,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { useBot } from "@/contexts/BotContext";
 
-const formatTime = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+// ---------------------------------------------
+// Helpers
+// ---------------------------------------------
+const formatTime = (seconds?: number): string => {
+  if (!seconds || !Number.isFinite(seconds) || seconds < 0) return "0:00";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
 
+// ---------------------------------------------
+// Component
+// ---------------------------------------------
 const NowPlaying = () => {
-  const { musicState, sendCommand, isLoading, isConnected } = useBot();
+  const {
+    sendCommand,
+    loading,
+    currentServerId,
+  } = useBot();
 
-  const [localVolume, setLocalVolume] = useState([50]);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isLiked, setIsLiked] = useState(false);
+  // Until realtime bot state exists
+  const isConnected = Boolean(currentServerId);
+  const isLoading = loading;
 
+  // Stubbed music state (SAFE)
+  const musicState = null;
   const nowPlaying = musicState?.nowPlaying;
   const status = musicState?.status;
 
-  useEffect(() => {
-    if (status?.volume !== undefined) {
-      setLocalVolume([status.volume]);
-    }
-  }, [status?.volume]);
+  const [localVolume, setLocalVolume] = useState<number[]>([50]);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
 
   const progress =
     nowPlaying && nowPlaying.duration > 0
@@ -38,7 +58,7 @@ const NowPlaying = () => {
       : [0];
 
   const safeCommand = async (
-    fn: () => Promise<void>
+    fn: () => Promise<any>
   ) => {
     if (!isConnected || isLoading) return;
     try {
@@ -48,16 +68,21 @@ const NowPlaying = () => {
     }
   };
 
+  // ---------------------------------------------
+  // UI
+  // ---------------------------------------------
   return (
     <div className="fixed bottom-0 left-16 lg:left-64 right-0 h-24 bg-card/95 backdrop-blur-2xl border-t border-border z-40">
       <div className="h-full flex items-center px-4 gap-4">
 
         {/* Track Info */}
         <div className="flex items-center gap-4 w-1/4 min-w-0">
-          <div className={cn(
-            "w-14 h-14 rounded-lg overflow-hidden flex items-center justify-center",
-            !nowPlaying && "bg-muted"
-          )}>
+          <div
+            className={cn(
+              "w-14 h-14 rounded-lg overflow-hidden flex items-center justify-center",
+              !nowPlaying && "bg-muted"
+            )}
+          >
             {nowPlaying ? (
               <img
                 src={nowPlaying.thumbnail}
@@ -74,7 +99,7 @@ const NowPlaying = () => {
               {nowPlaying?.title || "Nothing playing"}
             </h4>
             <p className="text-xs text-muted-foreground truncate">
-              {nowPlaying?.artist || "Play something to get started"}
+              {nowPlaying?.artist || "Select a server and play music"}
             </p>
           </div>
 
@@ -101,17 +126,17 @@ const NowPlaying = () => {
               <Shuffle className="w-4 h-4" />
             </Button>
 
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" disabled>
               <SkipBack className="w-5 h-5" />
             </Button>
 
             <Button
               variant="hero"
               size="icon-lg"
-              disabled={!nowPlaying || !isConnected}
+              disabled={!isConnected}
               onClick={() =>
                 safeCommand(() =>
-                  sendCommand(status?.isPlaying ? "pause" : "play")
+                  sendCommand("play")
                 )
               }
             >
@@ -139,14 +164,7 @@ const NowPlaying = () => {
               disabled={!isConnected}
               onClick={() =>
                 safeCommand(() =>
-                  sendCommand("loop", {
-                    loop:
-                      status?.loop === "off"
-                        ? "track"
-                        : status?.loop === "track"
-                        ? "queue"
-                        : "off",
-                  })
+                  sendCommand("loop", { loop: "off" })
                 )
               }
             >
@@ -156,16 +174,16 @@ const NowPlaying = () => {
 
           <div className="w-full flex items-center gap-3">
             <span className="text-xs w-10 text-right">
-              {nowPlaying ? formatTime(nowPlaying.position) : "0:00"}
+              {formatTime(nowPlaying?.position)}
             </span>
             <Slider
               value={progress}
               max={100}
               step={1}
-              disabled={!nowPlaying || !isConnected}
+              disabled
             />
             <span className="text-xs w-10">
-              {nowPlaying ? formatTime(nowPlaying.duration) : "0:00"}
+              {formatTime(nowPlaying?.duration)}
             </span>
           </div>
         </div>
@@ -175,9 +193,12 @@ const NowPlaying = () => {
           <Button
             variant="ghost"
             size="icon-sm"
+            disabled={!isConnected}
             onClick={() =>
               safeCommand(() =>
-                sendCommand("volume", { volume: isMuted ? localVolume[0] : 0 })
+                sendCommand("volume", {
+                  volume: isMuted ? localVolume[0] : 0,
+                })
               )
             }
           >
@@ -189,9 +210,12 @@ const NowPlaying = () => {
             max={100}
             step={1}
             disabled={!isConnected}
-            onValueChange={(v) =>
-              safeCommand(() => sendCommand("volume", { volume: v[0] }))
-            }
+            onValueChange={(v) => {
+              setLocalVolume(v);
+              safeCommand(() =>
+                sendCommand("volume", { volume: v[0] })
+              );
+            }}
           />
         </div>
       </div>

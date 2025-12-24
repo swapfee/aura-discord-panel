@@ -1,101 +1,67 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 
-type AuthUser = {
+export type AuthUser = {
   id: string;
   username: string;
   email?: string | null;
   avatar?: string | null;
 };
 
-interface AuthContextType {
+type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
-  signInWithDiscord: () => Promise<void>;
+  signInWithDiscord: () => void;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
-}
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = async () => {
-    if (!API_BASE) {
-      console.error("Missing VITE_API_BASE_URL");
-      setUser(null);
-      return;
-    }
-
     try {
-      const r = await fetch(`${API_BASE}/api/me`, {
-        credentials: "include",
-      });
-
+      const r = await fetch("/api/me", { credentials: "include" });
       if (!r.ok) {
         setUser(null);
         return;
       }
-
       const data = await r.json();
       setUser(data.user ?? null);
-    } catch (e) {
-      console.error("Failed to refresh user:", e);
+    } catch {
       setUser(null);
     }
   };
 
   useEffect(() => {
-    console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
     (async () => {
       setLoading(true);
       await refreshUser();
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-const signInWithDiscord = async () => {
-  window.location.href = "https://aura-api-production.up.railway.app/auth/discord";
-};
-
+  const signInWithDiscord = () => {
+    window.location.href = "/auth/discord";
+  };
 
   const signOut = async () => {
-    if (!API_BASE) throw new Error("Missing VITE_API_BASE_URL");
-
-    try {
-      await fetch(`${API_BASE}/auth/logout`, {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch (e) {
-      console.error("Logout request failed:", e);
-    } finally {
-      setUser(null);
-    }
+    await fetch("/auth/logout", { method: "POST", credentials: "include" });
+    setUser(null);
   };
 
   const value = useMemo(
-    () => ({
-      user,
-      loading,
-      signInWithDiscord,
-      signOut,
-      refreshUser,
-    }),
+    () => ({ user, loading, signInWithDiscord, signOut, refreshUser }),
     [user, loading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
+}
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-};
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
+}

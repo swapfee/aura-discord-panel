@@ -1,4 +1,5 @@
-// server.js (ESM) — Express + Discord OAuth + Postgres token storage + JOSE JWT sessions
+// server.js — Express + Discord OAuth + Postgres + JOSE JWT (Railway-safe)
+
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -15,6 +16,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+/* 🔑 REQUIRED FOR RAILWAY (SECURE COOKIES BEHIND PROXY) */
+app.set("trust proxy", 1);
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -24,35 +29,40 @@ const {
   DISCORD_REDIRECT_URI,
   JWT_SECRET,
   DATABASE_URL,
-  TOKEN_ENC_KEY, // REQUIRED: 32-byte key, base64 (recommended) or 64 hex chars
+  TOKEN_ENC_KEY,
   PORT,
 } = process.env;
 
-if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI || !JWT_SECRET) {
-  console.error("Missing required env vars: DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI, JWT_SECRET");
-  process.exit(1);
-}
-if (!DATABASE_URL) {
-  console.error("Missing required env var: DATABASE_URL (Railway Postgres connection string)");
-  process.exit(1);
-}
-if (!TOKEN_ENC_KEY) {
-  console.error("Missing required env var: TOKEN_ENC_KEY (32-byte key, base64 recommended)");
+if (
+  !DISCORD_CLIENT_ID ||
+  !DISCORD_CLIENT_SECRET ||
+  !DISCORD_REDIRECT_URI ||
+  !JWT_SECRET ||
+  !DATABASE_URL ||
+  !TOKEN_ENC_KEY
+) {
+  console.error("Missing required environment variables");
   process.exit(1);
 }
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 
+/* ======================
+   COOKIE
+====================== */
 function cookieOpts() {
   return {
     httpOnly: true,
-    secure: true,
+    secure: true, // ✅ REQUIRED for Railway
     sameSite: "lax",
     path: "/",
   };
 }
 
+/* ======================
+   ENCRYPTION (AES-256-GCM)
+====================== */
 function encKeyBytes() {
   const s = TOKEN_ENC_KEY.trim();
   if (/^[0-9a-fA-F]{64}$/.test(s)) return Buffer.from(s, "hex");
@@ -60,30 +70,31 @@ function encKeyBytes() {
 }
 const ENC_KEY = encKeyBytes();
 if (ENC_KEY.length !== 32) {
-  console.error("TOKEN_ENC_KEY must decode to 32 bytes (AES-256-GCM key).");
+  console.error("TOKEN_ENC_KEY must be 32 bytes");
   process.exit(1);
 }
 
-// AES-256-GCM encrypt/decrypt for storing tokens in DB
 function encryptText(plain) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
-  const ciphertext = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
+  const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return `${iv.toString("base64")}.${tag.toString("base64")}.${ciphertext.toString("base64")}`;
+  return `${iv.toString("base64")}.${tag.toString("base64")}.${encrypted.toString("base64")}`;
 }
+
 function decryptText(enc) {
-  const [ivB64, tagB64, dataB64] = String(enc).split(".");
-  if (!ivB64 || !tagB64 || !dataB64) throw new Error("Bad encrypted payload format");
+  const [ivB64, tagB64, dataB64] = enc.split(".");
   const iv = Buffer.from(ivB64, "base64");
   const tag = Buffer.from(tagB64, "base64");
   const data = Buffer.from(dataB64, "base64");
   const decipher = crypto.createDecipheriv("aes-256-gcm", ENC_KEY, iv);
   decipher.setAuthTag(tag);
-  const plain = Buffer.concat([decipher.update(data), decipher.final()]);
-  return plain.toString("utf8");
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
 }
 
+/* ======================
+   AUTH HELPERS
+====================== */
 async function requireUser(req) {
   const token = req.cookies.session;
   if (!token) return null;
@@ -95,50 +106,61 @@ async function requireUser(req) {
   }
 }
 
-async function upsertDiscordTokens({ userId, accessToken, refreshToken, expiresAtISO, scope, tokenType }) {
-  const accessEnc = encryptText(accessToken);
-  const refreshEnc = encryptText(refreshToken);
-
+/* ======================
+   DISCORD TOKEN STORAGE
+====================== */
+async function upsertDiscordTokens({
+  userId,
+  accessToken,
+  refreshToken,
+  expiresAtISO,
+  scope,
+  tokenType,
+}) {
   await pool.query(
     `
     INSERT INTO discord_oauth_tokens
       (user_id, access_token_enc, refresh_token_enc, expires_at, scope, token_type, updated_at)
-    VALUES
-      ($1, $2, $3, $4, $5, $6, NOW()::text)
+    VALUES ($1,$2,$3,$4,$5,$6,NOW()::text)
     ON CONFLICT (user_id)
     DO UPDATE SET
       access_token_enc = EXCLUDED.access_token_enc,
       refresh_token_enc = EXCLUDED.refresh_token_enc,
-      expires_at        = EXCLUDED.expires_at,
-      scope             = EXCLUDED.scope,
-      token_type        = EXCLUDED.token_type,
-      updated_at        = NOW()::text
+      expires_at = EXCLUDED.expires_at,
+      scope = EXCLUDED.scope,
+      token_type = EXCLUDED.token_type,
+      updated_at = NOW()::text
     `,
-    [userId, accessEnc, refreshEnc, expiresAtISO ?? null, scope ?? null, tokenType ?? null]
+    [
+      userId,
+      encryptText(accessToken),
+      encryptText(refreshToken),
+      expiresAtISO,
+      scope,
+      tokenType,
+    ]
   );
 }
 
 async function getDiscordTokens(userId) {
   const { rows } = await pool.query(
-    `SELECT user_id, access_token_enc, refresh_token_enc, expires_at, scope, token_type
-     FROM discord_oauth_tokens
-     WHERE user_id = $1`,
+    `SELECT * FROM discord_oauth_tokens WHERE user_id = $1`,
     [userId]
   );
   if (!rows.length) return null;
-
-  const row = rows[0];
+  const r = rows[0];
   return {
-    userId: row.user_id,
-    accessToken: decryptText(row.access_token_enc),
-    refreshToken: decryptText(row.refresh_token_enc),
-    expiresAtISO: row.expires_at ?? null,
-    scope: row.scope ?? null,
-    tokenType: row.token_type ?? null,
+    accessToken: decryptText(r.access_token_enc),
+    refreshToken: decryptText(r.refresh_token_enc),
+    expiresAtISO: r.expires_at,
   };
 }
 
-async function refreshDiscordAccessToken(refreshToken) {
+function isExpired(expiresAtISO) {
+  return Date.now() >= Date.parse(expiresAtISO) - 60_000;
+}
+
+async function refreshDiscordToken(refreshToken) {
   const body = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
     client_secret: DISCORD_CLIENT_SECRET,
@@ -153,33 +175,18 @@ async function refreshDiscordAccessToken(refreshToken) {
     body,
   });
 
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const msg = data?.error_description || data?.error || `Refresh failed (${r.status})`;
-    throw new Error(msg);
-  }
-
-  const expiresInSec = Number(data.expires_in ?? 0);
-  const expiresAtISO = expiresInSec
-    ? new Date(Date.now() + expiresInSec * 1000).toISOString()
-    : null;
+  const data = await r.json();
+  if (!r.ok) throw new Error("Failed to refresh token");
 
   return {
     accessToken: data.access_token,
-    refreshToken: data.refresh_token || refreshToken,
-    expiresAtISO,
-    scope: data.scope ?? null,
-    tokenType: data.token_type ?? null,
+    refreshToken: data.refresh_token ?? refreshToken,
+    expiresAtISO: new Date(Date.now() + data.expires_in * 1000).toISOString(),
   };
 }
 
 /* ======================
-   HEALTH
-====================== */
-app.get("/health", (_req, res) => res.json({ ok: true }));
-
-/* ======================
-   DISCORD AUTH (Passport)
+   PASSPORT DISCORD
 ====================== */
 passport.use(
   new DiscordStrategy(
@@ -189,20 +196,15 @@ passport.use(
       callbackUrl: DISCORD_REDIRECT_URI,
       scope: ["identify", "email", "guilds"],
     },
-    async (accessToken, refreshToken, profile, cb) => {
-      try {
-        const user = {
-          id: profile.id,
-          username: profile.username,
-          email: profile.email ?? null,
-          avatar: profile.avatar ?? null,
-        };
-
-        // pass tokens via authInfo; store in callback
-        return cb(null, user, { accessToken, refreshToken });
-      } catch (e) {
-        return cb(e);
-      }
+    async (accessToken, refreshToken, profile, done) => {
+      done(null, {
+        id: profile.id,
+        username: profile.username,
+        email: profile.email ?? null,
+        avatar: profile.avatar ?? null,
+        accessToken,
+        refreshToken,
+      });
     }
   )
 );
@@ -215,44 +217,35 @@ app.get(
   "/auth/discord/callback",
   passport.authenticate("discord", { session: false, failureRedirect: "/" }),
   async (req, res) => {
-    try {
-      const user = req.user;
-      const info = req.authInfo || {};
+    const u = req.user;
 
-      // Store tokens (expiresAt unknown here; we refresh on 401 anyway)
-      if (info.accessToken && info.refreshToken) {
-        await upsertDiscordTokens({
-          userId: user.id,
-          accessToken: info.accessToken,
-          refreshToken: info.refreshToken,
-          expiresAtISO: null,
-          scope: "identify email guilds",
-          tokenType: "Bearer",
-        });
-      }
+    await upsertDiscordTokens({
+      userId: u.id,
+      accessToken: u.accessToken,
+      refreshToken: u.refreshToken,
+      expiresAtISO: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      scope: "identify email guilds",
+      tokenType: "Bearer",
+    });
 
-      const sessionJwt = await new SignJWT({
-        username: user.username,
-        email: user.email ?? null,
-        avatar: user.avatar ?? null,
-      })
-        .setProtectedHeader({ alg: "HS256" })
-        .setSubject(user.id)
-        .setIssuedAt()
-        .setExpirationTime("2h")
-        .sign(JWT_KEY);
+    const jwt = await new SignJWT({
+      username: u.username,
+      email: u.email,
+      avatar: u.avatar,
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(u.id)
+      .setIssuedAt()
+      .setExpirationTime("2h")
+      .sign(JWT_KEY);
 
-      res.cookie("session", sessionJwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
-      res.redirect("/dashboard");
-    } catch (e) {
-      console.error("OAuth callback error:", e);
-      res.redirect("/");
-    }
+    res.cookie("session", jwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
+    res.redirect("/dashboard");
   }
 );
 
 /* ======================
-   ACCOUNT
+   API
 ====================== */
 app.get("/api/me", async (req, res) => {
   const user = await requireUser(req);
@@ -260,119 +253,50 @@ app.get("/api/me", async (req, res) => {
   res.json({ user });
 });
 
+app.get("/api/servers", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).json({ servers: [] });
+
+  let tokens = await getDiscordTokens(user.sub);
+  if (!tokens) return res.json({ servers: [] });
+
+  if (isExpired(tokens.expiresAtISO)) {
+    const refreshed = await refreshDiscordToken(tokens.refreshToken);
+    await upsertDiscordTokens({ userId: user.sub, ...refreshed });
+    tokens = refreshed;
+  }
+
+  const r = await fetch("https://discord.com/api/users/@me/guilds", {
+    headers: { Authorization: `Bearer ${tokens.accessToken}` },
+  });
+
+  const guilds = await r.json();
+  const servers = Array.isArray(guilds)
+    ? guilds.map((g) => ({
+        id: g.id,
+        discord_server_id: g.id,
+        server_name: g.name,
+        server_icon: g.icon,
+        member_count: null,
+        bot_connected: null,
+      }))
+    : [];
+
+  res.json({ servers });
+});
+
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());
   res.status(204).end();
 });
 
-app.post("/api/account/delete", async (req, res) => {
-  const user = await requireUser(req);
-  if (!user) return res.status(401).json({ ok: false, error: "Not authenticated" });
-
-  try {
-    await pool.query(`DELETE FROM discord_oauth_tokens WHERE user_id = $1`, [user.sub]);
-  } catch (e) {
-    console.error("Delete tokens failed:", e);
-  }
-
-  res.clearCookie("session", cookieOpts());
-  res.json({ ok: true });
-});
-
 /* ======================
-   SERVERS (Guilds list)
-====================== */
-async function fetchGuildsWithToken(accessToken) {
-  const r = await fetch("https://discord.com/api/users/@me/guilds", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  const data = await r.json().catch(() => null);
-  return { ok: r.ok, status: r.status, data };
-}
-
-app.get("/api/servers", async (req, res) => {
-  const user = await requireUser(req);
-  if (!user) return res.status(401).json({ servers: [] });
-
-  try {
-    let tokens = await getDiscordTokens(user.sub);
-    if (!tokens) return res.json({ servers: [] });
-
-    // Try once with current token
-    let guildsRes = await fetchGuildsWithToken(tokens.accessToken);
-
-    // If unauthorized, refresh and retry once
-    if (guildsRes.status === 401) {
-      const refreshed = await refreshDiscordAccessToken(tokens.refreshToken);
-
-      await upsertDiscordTokens({
-        userId: user.sub,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        expiresAtISO: refreshed.expiresAtISO,
-        scope: refreshed.scope,
-        tokenType: refreshed.tokenType,
-      });
-
-      tokens = { ...tokens, ...refreshed };
-      guildsRes = await fetchGuildsWithToken(tokens.accessToken);
-    }
-
-    if (!guildsRes.ok || !Array.isArray(guildsRes.data)) {
-      console.error("Discord guilds fetch failed:", guildsRes.status, guildsRes.data);
-      return res.json({ servers: [] });
-    }
-
-    const servers = guildsRes.data.map((g) => ({
-      id: String(g.id),
-      discord_server_id: String(g.id),
-      server_name: g.name,
-      server_icon: g.icon ?? null,
-      member_count: null,      // not available from this endpoint
-      bot_connected: null,     // compute later using bot
-    }));
-
-    return res.json({ servers });
-  } catch (e) {
-    console.error("/api/servers error:", e);
-    return res.status(500).json({ servers: [] });
-  }
-});
-
-/* ======================
-   BOT COMMANDS (stub)
-====================== */
-app.post("/api/bot/command", async (req, res) => {
-  const user = await requireUser(req);
-  if (!user) return res.status(401).json({ ok: false, error: "Not authenticated" });
-
-  const { command, serverId, payload } = req.body || {};
-  if (!command || !serverId) {
-    return res.status(400).json({ ok: false, error: "Missing command or serverId" });
-  }
-
-  console.log("[bot-command]", {
-    userId: user.sub,
-    serverId,
-    command,
-    payload: payload ?? {},
-  });
-
-  return res.json({ ok: true });
-});
-
-/* ======================
-   FRONTEND SERVING
+   STATIC FRONTEND
 ====================== */
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
+app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
-});
-
-const listenPort = Number(PORT || 3000);
-app.listen(listenPort, "0.0.0.0", () => {
-  console.log(`App running on ${listenPort}`);
-});
+app.listen(Number(PORT || 3000), "0.0.0.0", () =>
+  console.log("Server running")
+);

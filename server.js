@@ -65,7 +65,7 @@ passport.use(
     {
       clientId: DISCORD_CLIENT_ID,
       clientSecret: DISCORD_CLIENT_SECRET,
-      callbackURL: DISCORD_REDIRECT_URI,
+      callbackUrl: DISCORD_REDIRECT_URI,
       scope: ["identify", "email"],
     },
     (_accessToken, _refreshToken, profile, done) => done(null, profile)

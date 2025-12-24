@@ -1,8 +1,9 @@
 import { forwardRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Music, Zap, Users, Sliders, Play } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/contexts/AuthContext";
 
 const features = [
   {
@@ -38,6 +39,9 @@ const DiscordIcon = forwardRef<SVGSVGElement, { className?: string }>(
 DiscordIcon.displayName = "DiscordIcon";
 
 export default function LandingPage() {
+  const { user, signInWithDiscord } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">
       {/* Background effects */}
@@ -55,10 +59,20 @@ export default function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm">
-              Login
-            </Button>
-            <Button variant="hero" size="sm">
+            {user ? (
+              <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard")}>
+                Dashboard
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={signInWithDiscord}>
+                Login
+              </Button>
+            )}
+            <Button 
+              variant="hero" 
+              size="sm"
+              onClick={() => window.open("https://discord.com/oauth2/authorize?client_id=YOUR_BOT_CLIENT_ID&permissions=8&scope=bot%20applications.commands", "_blank")}
+            >
               <DiscordIcon className="w-4 h-4" />
               Add to Discord
             </Button>
@@ -83,11 +97,19 @@ export default function LandingPage() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Button variant="hero" size="xl">
+          <Button 
+            variant="hero" 
+            size="xl"
+            onClick={() => window.open("https://discord.com/oauth2/authorize?client_id=YOUR_BOT_CLIENT_ID&permissions=8&scope=bot%20applications.commands", "_blank")}
+          >
             <DiscordIcon className="w-5 h-5" />
             Add to Discord
           </Button>
-          <Button variant="hero-outline" size="xl">
+          <Button 
+            variant="hero-outline" 
+            size="xl" 
+            onClick={() => navigate("/dashboard")}
+          >
             <Play className="w-5 h-5" />
             Open Dashboard
           </Button>

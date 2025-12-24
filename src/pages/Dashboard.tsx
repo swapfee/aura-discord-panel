@@ -1,5 +1,6 @@
 // src/pages/Dashboard.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Home,
   ListMusic,
@@ -8,10 +9,14 @@ import {
   Sliders,
   Settings,
   Menu,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { useBot } from "@/contexts/BotContext";
 
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import DashboardQueue from "@/components/dashboard/DashboardQueue";
@@ -20,7 +25,16 @@ import DashboardPlaylists from "@/components/dashboard/DashboardPlaylists";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import DashboardSettings from "@/components/dashboard/DashboardSettings";
 import NowPlaying from "@/components/dashboard/NowPlaying";
-import ServerSelector, { Server } from "@/components/dashboard/ServerSelector";
+import ServerSelector from "@/components/dashboard/ServerSelector";
+
+type Server = {
+  id: string;
+  discord_server_id: string;
+  server_name: string;
+  server_icon?: string | null;
+  member_count?: number;
+  bot_connected?: boolean;
+};
 
 const navItems = [
   { id: "overview", label: "Overview", icon: Home },
@@ -31,22 +45,46 @@ const navItems = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
-// Demo servers - replace with real data from your bot API later
-const demoServers: Server[] = [
-  {
-    id: "1",
-    discord_server_id: "1403488603027279872",
-    server_name: "Revert Development",
-    server_icon: null,
-    member_count: 10,
-    bot_connected: true,
-  },
-];
-
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState("overview");
+  const navigate = useNavigate();
+  const { user, loading, signOut } = useAuth();
+  const { setCurrentServerId } = useBot();
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [servers] = useState<Server[]>(demoServers);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [servers, setServers] = useState<Server[]>([]);
+  const [serversLoading, setServersLoading] = useState(true);
+
+  // Redirect if logged out
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate("/");
+    }
+  }, [loading, user, navigate]);
+
+  // Fetch servers once authenticated
+  useEffect(() => {
+    if (!user) return;
+
+    setServersLoading(true);
+    fetch("/api/servers", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        setServers(Array.isArray(data.servers) ? data.servers : []);
+      })
+      .catch(() => setServers([]))
+      .finally(() => setServersLoading(false));
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   const renderContent = () => {
     switch (activeTab) {
@@ -62,6 +100,82 @@ export default function Dashboard() {
         return <DashboardSettings />;
       default:
         return <DashboardOverview />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar border-r transition-all",
+          sidebarOpen ? "w-64" : "w-16"
+        )}
+      >
+        {/* Header */}
+        <div className="h-16 flex items-center justify-between px-4 border-b">
+          {sidebarOpen && <span className="font-bold">SoundWave</span>}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            <Menu />
+          </Button>
+        </div>
+
+        {/* Server Selector */}
+        <div className="p-3">
+          <ServerSelector
+            servers={servers}
+            loading={serversLoading}
+            collapsed={!sidebarOpen}
+            onServerChange={setCurrentServerId}
+          />
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 p-3 space-y-1">
+          {navItems.map((item) => (
+            <Button
+              key={item.id}
+              variant={activeTab === item.id ? "secondary" : "ghost"}
+              className={cn(
+                "w-full justify-start gap-3",
+                !sidebarOpen && "justify-center"
+              )}
+              onClick={() => setActiveTab(item.id)}
+            >
+              <item.icon className="w-5 h-5" />
+              {sidebarOpen && item.label}
+            </Button>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="p-3 border-t">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3"
+            onClick={async () => {
+              await signOut();
+              navigate("/");
+            }}
+          >
+            <LogOut className="w-4 h-4" />
+            {sidebarOpen && "Sign out"}
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className={cn("flex-1", sidebarOpen ? "ml-64" : "ml-16")}>
+        <NowPlaying />
+        <div className="p-6 pb-32">{renderContent()}</div>
+      </main>
+    </div>
+  );
+}
     }
   };
 

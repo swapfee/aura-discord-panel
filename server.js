@@ -23,6 +23,7 @@ const {
   DISCORD_CLIENT_ID,
   DISCORD_CLIENT_SECRET,
   DISCORD_REDIRECT_URI,
+  DISCORD_BOT_TOKEN,
   JWT_SECRET,
   MONGO_URL,
   PORT,
@@ -32,9 +33,9 @@ if (
   !DISCORD_CLIENT_ID ||
   !DISCORD_CLIENT_SECRET ||
   !DISCORD_REDIRECT_URI ||
+  !DISCORD_BOT_TOKEN ||
   !JWT_SECRET ||
   !MONGO_URL
-
 ) {
   console.error("Missing required environment variables");
   process.exit(1);
@@ -82,7 +83,7 @@ async function saveDiscordTokens({
       scope,
       tokenType,
     },
-    { upsert: true, new: true }
+    { upsert: true }
   );
 }
 
@@ -123,8 +124,6 @@ async function refreshDiscordToken(refreshToken) {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? refreshToken,
     expiresAt: new Date(Date.now() + data.expires_in * 1000),
-    scope: data.scope,
-    tokenType: data.token_type,
   };
 }
 
@@ -203,20 +202,27 @@ app.get("/api/servers", async (req, res) => {
     tokens = refreshed;
   }
 
-  const r = await fetch("https://discord.com/api/users/@me/guilds", {
-    headers: { Authorization: `Bearer ${tokens.accessToken}` },
-  });
+  const [userGuildsRes, botGuildsRes] = await Promise.all([
+    fetch("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    }),
+    fetch("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    }),
+  ]);
 
-  const guilds = await r.json();
+  const userGuilds = await userGuildsRes.json();
+  const botGuilds = await botGuildsRes.json();
+  const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
-  const servers = Array.isArray(guilds)
-    ? guilds.map((g) => ({
+  const servers = Array.isArray(userGuilds)
+    ? userGuilds.map((g) => ({
         id: g.id,
         discord_server_id: g.id,
         server_name: g.name,
         server_icon: g.icon,
         member_count: null,
-        bot_connected: null,
+        bot_connected: botGuildIds.has(g.id),
       }))
     : [];
 

@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { ChevronDown, Plus, Check, Users, ServerOff, RefreshCw } from "lucide-react";
+import {
+  ChevronDown,
+  Plus,
+  Check,
+  Users,
+  ServerOff,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,22 +16,47 @@ interface ServerSelectorProps {
   onServerChange?: (serverId: string) => void;
 }
 
-const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorProps) => {
+const ServerSelector = ({
+  collapsed = false,
+  onServerChange,
+}: ServerSelectorProps) => {
   const { servers, refreshServers } = useAuth();
+
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-  const initializedRef = useRef(false);
 
-  // Auto-select first server and notify parent on initial load
+  const initializedRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  /* ----------------------------------
+   * Auto-select first server
+   * ---------------------------------- */
   useEffect(() => {
-    if (servers.length > 0 && !initializedRef.current) {
-      const firstServer = servers[0];
-      setSelectedServerId(firstServer.id);
-      onServerChange?.(firstServer.discord_server_id);
+    if (!servers.length) return;
+
+    const stillExists = servers.some(s => s.id === selectedServerId);
+
+    if (!initializedRef.current || !stillExists) {
+      const first = servers[0];
+      setSelectedServerId(first.id);
+      onServerChange?.(first.discord_server_id);
       initializedRef.current = true;
     }
-  }, [servers, onServerChange]);
+  }, [servers, selectedServerId, onServerChange]);
+
+  /* ----------------------------------
+   * Close dropdown on outside click
+   * ---------------------------------- */
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleRefresh = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -33,51 +65,45 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
     setIsRefreshing(false);
   };
 
-  const selectedServer = servers.find(s => s.id === selectedServerId) || servers[0];
+  const selectedServer =
+    servers.find(s => s.id === selectedServerId) ?? servers[0];
 
-  const handleServerSelect = (server: typeof servers[0]) => {
+  const handleServerSelect = (server: typeof servers[number]) => {
     setSelectedServerId(server.id);
     setIsOpen(false);
     onServerChange?.(server.discord_server_id);
   };
 
-  // No servers available
-  if (servers.length === 0) {
-    if (collapsed) {
-      return (
-        <Button
-          variant="glass"
-          size="icon"
-          className="w-full aspect-square"
-          disabled
-        >
-          <ServerOff className="w-5 h-5 text-muted-foreground" />
-        </Button>
-      );
-    }
-
+  /* ----------------------------------
+   * No servers
+   * ---------------------------------- */
+  if (!servers.length) {
     return (
-      <div className="p-3 rounded-xl bg-secondary/50 border border-border text-center">
-        <ServerOff className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
-        <p className="text-xs text-muted-foreground">No servers found</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          You need admin access to manage servers
-        </p>
-      </div>
+      <Button
+        variant="glass"
+        size="icon"
+        className="w-full aspect-square"
+        disabled
+      >
+        <ServerOff className="w-5 h-5 text-muted-foreground" />
+      </Button>
     );
   }
 
+  /* ----------------------------------
+   * Collapsed mode
+   * ---------------------------------- */
   if (collapsed) {
     return (
       <Button
         variant="glass"
         size="icon"
         className="w-full aspect-square"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsOpen(o => !o)}
       >
         {selectedServer?.server_icon ? (
-          <img 
-            src={selectedServer.server_icon} 
+          <img
+            src={selectedServer.server_icon}
             alt={selectedServer.server_name}
             className="w-6 h-6 rounded-md"
           />
@@ -88,18 +114,21 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
     );
   }
 
+  /* ----------------------------------
+   * Full selector
+   * ---------------------------------- */
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <Button
         variant="glass"
         className="w-full justify-between h-12 px-3"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsOpen(o => !o)}
       >
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center overflow-hidden">
             {selectedServer?.server_icon ? (
-              <img 
-                src={selectedServer.server_icon} 
+              <img
+                src={selectedServer.server_icon}
                 alt={selectedServer.server_name}
                 className="w-full h-full object-cover"
               />
@@ -108,42 +137,46 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
             )}
           </div>
           <div className="text-left">
-            <p className="text-sm font-medium text-foreground truncate max-w-[120px]">
-              {selectedServer?.server_name || "Select Server"}
+            <p className="text-sm font-medium truncate max-w-[140px]">
+              {selectedServer?.server_name}
             </p>
             <p className="text-xs text-muted-foreground">
-              {selectedServer?.member_count?.toLocaleString() || 0} members
+              {selectedServer?.member_count?.toLocaleString() ?? 0} members
             </p>
           </div>
         </div>
-        <ChevronDown className={cn(
-          "w-4 h-4 text-muted-foreground transition-transform",
-          isOpen && "rotate-180"
-        )} />
+        <ChevronDown
+          className={cn(
+            "w-4 h-4 transition-transform",
+            isOpen && "rotate-180"
+          )}
+        />
       </Button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
-          <div className="p-2 border-b border-border flex items-center justify-between">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-card border rounded-xl shadow-xl z-50">
+          <div className="p-2 border-b flex justify-between items-center">
             <span className="text-xs text-muted-foreground">Your Servers</span>
             <Button
               variant="ghost"
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="h-6 px-2"
             >
-              <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
+              <RefreshCw
+                className={cn("w-3 h-3", isRefreshing && "animate-spin")}
+              />
             </Button>
           </div>
+
           <div className="p-2 space-y-1 max-h-64 overflow-y-auto">
-            {servers.map((server) => (
+            {servers.map(server => (
               <div
                 key={server.id}
                 className={cn(
-                  "w-full p-2 rounded-lg transition-colors",
-                  selectedServerId === server.id 
-                    ? "bg-primary/10 border border-primary/20" 
+                  "p-2 rounded-lg",
+                  server.id === selectedServerId
+                    ? "bg-primary/10 border border-primary/20"
                     : "hover:bg-secondary"
                 )}
               >
@@ -151,10 +184,10 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
                   onClick={() => handleServerSelect(server)}
                   className="w-full flex items-center gap-3 text-left"
                 >
-                  <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0">
+                  <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden">
                     {server.server_icon ? (
-                      <img 
-                        src={server.server_icon} 
+                      <img
+                        src={server.server_icon}
                         alt={server.server_name}
                         className="w-full h-full object-cover"
                       />
@@ -162,44 +195,23 @@ const ServerSelector = ({ collapsed = false, onServerChange }: ServerSelectorPro
                       <span className="text-xl">🎵</span>
                     )}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {server.server_name}
-                      </p>
-                      {selectedServerId === server.id && (
-                        <Check className="w-4 h-4 text-primary shrink-0" />
+                      <p className="truncate">{server.server_name}</p>
+                      {server.id === selectedServerId && (
+                        <Check className="w-4 h-4 text-primary" />
                       )}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex gap-2 text-xs text-muted-foreground">
                       <Users className="w-3 h-3" />
-                      <span>{server.member_count?.toLocaleString() || 0}</span>
-                      {server.bot_connected ? (
-                        <span className="text-success">• Connected</span>
-                      ) : (
-                        <span className="text-warning">• Not connected</span>
-                      )}
+                      {server.member_count}
+                      <span>
+                        • {server.bot_connected ? "Connected" : "Not connected"}
+                      </span>
                     </div>
                   </div>
                 </button>
-                {!server.bot_connected && (
-                  <Button
-                    variant="hero"
-                    size="sm"
-                    className="w-full mt-2"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // Open Discord bot invite URL with pre-selected guild
-                      window.open(
-                        `https://discord.com/oauth2/authorize?client_id=1449947972191125676&permissions=8&scope=bot%20applications.commands&guild_id=${server.discord_server_id}`,
-                        "_blank"
-                      );
-                    }}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Bot
-                  </Button>
-                )}
               </div>
             ))}
           </div>

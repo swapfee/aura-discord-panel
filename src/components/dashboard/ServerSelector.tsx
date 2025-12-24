@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
   ChevronDown,
-  Plus,
   Check,
   Users,
   ServerOff,
@@ -9,19 +8,30 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/contexts/AuthContext";
+
+// Server type definition
+export interface Server {
+  id: string;
+  discord_server_id: string;
+  server_name: string;
+  server_icon?: string | null;
+  member_count?: number;
+  bot_connected?: boolean;
+}
 
 interface ServerSelectorProps {
   collapsed?: boolean;
   onServerChange?: (serverId: string) => void;
+  servers: Server[];
+  onRefresh?: () => Promise<void>;
 }
 
 const ServerSelector = ({
   collapsed = false,
   onServerChange,
+  servers,
+  onRefresh,
 }: ServerSelectorProps) => {
-  const { servers, refreshServers } = useAuth();
-
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
@@ -29,9 +39,7 @@ const ServerSelector = ({
   const initializedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  /* ----------------------------------
-   * Auto-select first server
-   * ---------------------------------- */
+  /* Auto-select first server */
   useEffect(() => {
     if (!servers.length) return;
 
@@ -45,9 +53,7 @@ const ServerSelector = ({
     }
   }, [servers, selectedServerId, onServerChange]);
 
-  /* ----------------------------------
-   * Close dropdown on outside click
-   * ---------------------------------- */
+  /* Close dropdown on outside click */
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (!containerRef.current?.contains(e.target as Node)) {
@@ -60,27 +66,26 @@ const ServerSelector = ({
 
   const handleRefresh = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!onRefresh) return;
     setIsRefreshing(true);
-    await refreshServers();
+    await onRefresh();
     setIsRefreshing(false);
   };
 
   const selectedServer =
     servers.find(s => s.id === selectedServerId) ?? servers[0];
 
-  const handleServerSelect = (server: typeof servers[number]) => {
+  const handleServerSelect = (server: Server) => {
     setSelectedServerId(server.id);
     setIsOpen(false);
     onServerChange?.(server.discord_server_id);
   };
 
-  /* ----------------------------------
-   * No servers
-   * ---------------------------------- */
+  /* No servers */
   if (!servers.length) {
     return (
       <Button
-        variant="glass"
+        variant="ghost"
         size="icon"
         className="w-full aspect-square"
         disabled
@@ -90,13 +95,11 @@ const ServerSelector = ({
     );
   }
 
-  /* ----------------------------------
-   * Collapsed mode
-   * ---------------------------------- */
+  /* Collapsed mode */
   if (collapsed) {
     return (
       <Button
-        variant="glass"
+        variant="ghost"
         size="icon"
         className="w-full aspect-square"
         onClick={() => setIsOpen(o => !o)}
@@ -114,13 +117,11 @@ const ServerSelector = ({
     );
   }
 
-  /* ----------------------------------
-   * Full selector
-   * ---------------------------------- */
+  /* Full selector */
   return (
     <div ref={containerRef} className="relative">
       <Button
-        variant="glass"
+        variant="ghost"
         className="w-full justify-between h-12 px-3"
         onClick={() => setIsOpen(o => !o)}
       >
@@ -157,16 +158,18 @@ const ServerSelector = ({
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border rounded-xl shadow-xl z-50">
           <div className="p-2 border-b flex justify-between items-center">
             <span className="text-xs text-muted-foreground">Your Servers</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              <RefreshCw
-                className={cn("w-3 h-3", isRefreshing && "animate-spin")}
-              />
-            </Button>
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+              >
+                <RefreshCw
+                  className={cn("w-3 h-3", isRefreshing && "animate-spin")}
+                />
+              </Button>
+            )}
           </div>
 
           <div className="p-2 space-y-1 max-h-64 overflow-y-auto">

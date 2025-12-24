@@ -19,7 +19,6 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          {/* BotProvider MUST wrap Dashboard */}
           <BotProvider>
             <Routes>
               <Route path="/" element={<LandingPage />} />

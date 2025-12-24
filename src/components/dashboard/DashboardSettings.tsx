@@ -46,7 +46,7 @@ const DashboardSettings = () => {
 
     try {
       // One backend endpoint to delete everything on the server side
-      // You should implement this in server.js:
+      // Implement this in server.js:
       // POST /api/account/delete  -> { ok: true }
       const res = await fetch("/api/account/delete", {
         method: "POST",

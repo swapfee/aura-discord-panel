@@ -1,16 +1,14 @@
 import CryptoJS from "crypto-js";
 
-const SECRET = process.env.TOKEN_ENC_SECRET;
-
+const SECRET = process.env.CRYPTO_SECRET;
 if (!SECRET) {
-  throw new Error("Missing TOKEN_ENC_SECRET");
+  throw new Error("Missing CRYPTO_SECRET");
 }
 
-export function encrypt(text: string): string {
+export function encrypt(text) {
   return CryptoJS.AES.encrypt(text, SECRET).toString();
 }
 
-export function decrypt(cipher: string): string {
-  const bytes = CryptoJS.AES.decrypt(cipher, SECRET);
-  return bytes.toString(CryptoJS.enc.Utf8);
+export function decrypt(ciphertext) {
+  return CryptoJS.AES.decrypt(ciphertext, SECRET).toString(CryptoJS.enc.Utf8);
 }

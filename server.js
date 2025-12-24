@@ -24,7 +24,7 @@ const {
   DISCORD_CLIENT_SECRET,
   DISCORD_REDIRECT_URI,
   JWT_SECRET,
-  MONGODB_URI,
+  MONGO_URL,
   PORT,
 } = process.env;
 
@@ -33,13 +33,14 @@ if (
   !DISCORD_CLIENT_SECRET ||
   !DISCORD_REDIRECT_URI ||
   !JWT_SECRET ||
-  !MONGODB_URI
+  !MONGO_URL
+
 ) {
   console.error("Missing required environment variables");
   process.exit(1);
 }
 
-await mongoose.connect(MONGODB_URI);
+await mongoose.connect(MONGO_URL);
 
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 

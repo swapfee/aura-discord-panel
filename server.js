@@ -61,21 +61,29 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
    DISCORD AUTH
 ====================== */
 // server.js (Passport setup)
-passport.use(new DiscordStrategy(
-  {
-    clientId: process.env.DISCORD_CLIENT_ID,
-    clientSecret: process.env.DISCORD_CLIENT_SECRET,
-    callbackUrl: process.env.DISCORD_REDIRECT_URI,
-    scope: ['identify', 'email', 'guilds'] // ← add the 'guilds' scope
-  },
-  async function(accessToken, refreshToken, profile, cb) {
-    // save profile info and accessToken in JWT
-    const user = { id: profile.id, username: profile.username };
-    const tokenPayload = { user, accessToken };
-    const jwtToken = jwt.sign(tokenPayload, process.env.JWT_SECRET);
-    return cb(null, user, { jwt: jwtToken });
-  }
-));
+passport.use(
+  new DiscordStrategy(
+    {
+      clientId: DISCORD_CLIENT_ID,
+      clientSecret: DISCORD_CLIENT_SECRET,
+      callbackUrl: DISCORD_REDIRECT_URI,
+      scope: ["identify", "email", "guilds"],
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      // Passport should ONLY authenticate the user
+      const user = {
+        id: profile.id,
+        username: profile.username,
+        email: profile.email ?? null,
+        avatar: profile.avatar ?? null,
+      };
+
+      // We DO NOT issue JWTs here
+      return done(null, user);
+    }
+  )
+);
+
 
 
 app.use(passport.initialize());
@@ -90,8 +98,8 @@ app.get(
 
     const jwt = await new SignJWT({
       username: user.username,
-      email: user.email ?? null,
-      avatar: user.avatar ?? null,
+      email: user.email,
+      avatar: user.avatar,
     })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject(user.id)
@@ -99,10 +107,15 @@ app.get(
       .setExpirationTime("2h")
       .sign(JWT_KEY);
 
-    res.cookie("session", jwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
+    res.cookie("session", jwt, {
+      ...cookieOpts(),
+      maxAge: 2 * 60 * 60 * 1000,
+    });
+
     res.redirect("/dashboard");
   }
 );
+
 
 app.get("/api/me", async (req, res) => {
   const user = await requireUser(req, res);

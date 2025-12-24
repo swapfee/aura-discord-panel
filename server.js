@@ -200,9 +200,9 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 passport.use(
   new DiscordStrategy(
     {
-      clientID: DISCORD_CLIENT_ID,
+      clientId: DISCORD_CLIENT_ID,
       clientSecret: DISCORD_CLIENT_SECRET,
-      callbackURL: DISCORD_REDIRECT_URI,
+      callbackUrl: DISCORD_REDIRECT_URI,
       // NOTE: "guilds" is the key scope for listing guilds a user is in.
       scope: ["identify", "email", "guilds"],
     },

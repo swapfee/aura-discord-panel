@@ -13,6 +13,7 @@ import { DiscordToken } from "./src/models/DiscordToken.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
 const app = express();
 app.set("trust proxy", 1);
 
@@ -52,6 +53,17 @@ function cookieOpts() {
     sameSite: "lax",
     path: "/",
   };
+}
+
+const ADMINISTRATOR_PERMISSION = 1n << 3n;
+
+function hasAdminPermissions(permissions){
+  try{
+    const perms = BigInt(permissions);
+    return (perms & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+  } catch{
+    return false;
+  }
 }
 
 async function requireUser(req) {
@@ -217,37 +229,45 @@ app.get("/api/servers", async (req, res) => {
     }),
   ]);
 
-  const userGuilds = await userGuildsRes.json();
-  const botGuilds = await botGuildsRes.json();
-  const botGuildIds = new Set(botGuilds.map((g) => g.id));
+  const userGuilds = Array.isArray(await userGuildsRes.json())
+    ? await userGuildsRes.json()
+    : [];
 
-  const ADMIN = 1 << 3;
-  const MANAGE_GUILD = 1 << 5;
+  const botGuilds = Array.isArray(await botGuildsRes.json())
+    ? await botGuildsRes.json()
+    : [];
+
+  const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
   const servers = [];
 
   for (const g of userGuilds) {
-    const permissions = Number(g.permissions);
-    const canInviteBot =
-      (permissions & ADMIN) === ADMIN ||
-      (permissions & MANAGE_GUILD) === MANAGE_GUILD;
-
     let memberCount = null;
+    let permissionsOk = false;
 
     if (botGuildIds.has(g.id)) {
       try {
-        const guildRes = await fetch(
-          `https://discord.com/api/guilds/${g.id}?with_counts=true`,
-          {
+        const [guildRes, memberRes] = await Promise.all([
+          fetch(`https://discord.com/api/guilds/${g.id}?with_counts=true`, {
             headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
-          }
-        );
+          }),
+          fetch(`https://discord.com/api/guilds/${g.id}/members/@me`, {
+            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+          }),
+        ]);
 
         if (guildRes.ok) {
           const guildData = await guildRes.json();
           memberCount = guildData.approximate_member_count ?? null;
         }
-      } catch {}
+
+        if (memberRes.ok) {
+          const member = await memberRes.json();
+          permissionsOk = hasAdminPermission(member.permissions);
+        }
+      } catch {
+        permissionsOk = false;
+      }
     }
 
     servers.push({
@@ -257,12 +277,13 @@ app.get("/api/servers", async (req, res) => {
       server_icon: g.icon,
       member_count: memberCount,
       bot_connected: botGuildIds.has(g.id),
-      can_invite_bot: canInviteBot, // ✅ NEW
+      permissions_ok: permissionsOk,
     });
   }
 
   res.json({ servers });
 });
+
 
 app.post("/api/servers/sync", async (req, res) => {
   const user = await requireUser(req);

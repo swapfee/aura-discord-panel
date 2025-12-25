@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, Check, Users, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,15 +10,15 @@ export type Server = {
   server_icon?: string | null;
   member_count?: number | null;
   bot_connected?: boolean | null;
-  can_invite_bot?: boolean | null; 
+  can_invite_bot?: boolean | null;
 };
-
 
 interface ServerSelectorProps {
   servers: Server[];
   loading?: boolean;
   collapsed?: boolean;
   onServerChange: (serverId: string) => void;
+  refetchServers?: () => Promise<void>; // ✅ ADD
 }
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
@@ -28,9 +28,13 @@ export default function ServerSelector({
   loading = false,
   collapsed = false,
   onServerChange,
+  refetchServers,
 }: ServerSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [selected, setSelected] = useState<Server | null>(null);
+  const [installingGuild, setInstallingGuild] = useState<string | null>(null);
+
+  const pollTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (!selected && servers.length > 0) {
@@ -50,63 +54,76 @@ export default function ServerSelector({
       ? `https://cdn.discordapp.com/icons/${s.discord_server_id}/${s.server_icon}.png?size=64`
       : null;
 
-const inviteBot = (serverId: string) => {
-  if (!DISCORD_CLIENT_ID) return;
+  /* ======================
+     BOT INVITE + POLLING
+  ====================== */
+  const inviteBot = (serverId: string) => {
+    if (!DISCORD_CLIENT_ID || !refetchServers) return;
 
-  const redirectUri = encodeURIComponent(
-    `${window.location.origin}/bot-installed`
-  );
+    const url =
+      `https://discord.com/oauth2/authorize` +
+      `?client_id=${DISCORD_CLIENT_ID}` +
+      `&permissions=8` +
+      `&scope=bot%20applications.commands` +
+      `&guild_id=${serverId}` +
+      `&disable_guild_select=true`;
 
-  const url =
-    `https://discord.com/oauth2/authorize` +
-    `?client_id=${DISCORD_CLIENT_ID}` +
-    `&permissions=8` +
-    `&scope=bot%20applications.commands` +
-    `&guild_id=${serverId}` +
-    `&disable_guild_select=true` +
-    `&redirect_uri=${redirectUri}` +
-    `&response_type=code`;
+    window.open(url, "_blank", "noopener,noreferrer");
 
-  const popup = window.open(url, "_blank", "noopener,noreferrer");
+    startPolling(serverId);
+  };
 
-  const timer = setInterval(() => {
-    if (!popup || popup.closed) {
-      clearInterval(timer);
-      // Trigger refresh after install
-      window.location.reload();
+  const startPolling = (serverId: string) => {
+    if (!refetchServers) return;
+
+    setInstallingGuild(serverId);
+    const startedAt = Date.now();
+
+    pollTimer.current = window.setInterval(async () => {
+      await refetchServers();
+
+      const updated = servers.find(
+        (s) =>
+          s.discord_server_id === serverId &&
+          s.bot_connected === true
+      );
+
+      const timeout = Date.now() - startedAt > 30_000;
+
+      if (updated || timeout) {
+        stopPolling();
+      }
+    }, 4000);
+  };
+
+  const stopPolling = () => {
+    if (pollTimer.current) {
+      clearInterval(pollTimer.current);
+      pollTimer.current = null;
     }
-  }, 1000);
-};
+    setInstallingGuild(null);
+  };
 
-
-
+  /* ======================
+     COLLAPSED MODE
+  ====================== */
   if (collapsed) {
     return (
-      <Button
-        variant="glass"
-        size="icon"
-        className="w-full aspect-square"
-        onClick={() => setIsOpen((v) => !v)}
-      >
-        {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : selected ? (
-          iconUrl(selected) ? (
-            <img
-              src={iconUrl(selected)!}
-              alt={selected.server_name}
-              className="w-8 h-8 rounded-lg"
-            />
-          ) : (
-            <span className="text-sm font-bold">
-              {selected.server_name[0]}
-            </span>
-          )
+      <Button variant="glass" size="icon" className="w-full aspect-square">
+        {selected && iconUrl(selected) ? (
+          <img
+            src={iconUrl(selected)!}
+            alt={selected.server_name}
+            className="w-8 h-8 rounded-lg"
+          />
         ) : null}
       </Button>
     );
   }
 
+  /* ======================
+     FULL MODE
+  ====================== */
   return (
     <div className="relative">
       <Button
@@ -133,7 +150,7 @@ const inviteBot = (serverId: string) => {
               </div>
 
               <div className="text-left min-w-0">
-                <p className="text-sm font-medium truncate max-w-[140px]">
+                <p className="text-sm font-medium truncate">
                   {selected.server_name}
                 </p>
                 {typeof selected.member_count === "number" && (
@@ -146,39 +163,30 @@ const inviteBot = (serverId: string) => {
           )}
         </div>
 
-        {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <ChevronDown
-            className={cn(
-              "w-4 h-4 transition-transform",
-              isOpen && "rotate-180"
-            )}
-          />
-        )}
+        <ChevronDown
+          className={cn(
+            "w-4 h-4 transition-transform",
+            isOpen && "rotate-180"
+          )}
+        />
       </Button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-card border rounded-xl shadow-xl z-50">
           <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
             {servers.map((server) => {
-              const selectedRow = selected?.id === server.id;
+              const installing = installingGuild === server.discord_server_id;
 
               return (
                 <div
                   key={server.id}
-                  className={cn(
-                    "w-full p-2 rounded-lg transition-colors",
-                    selectedRow
-                      ? "bg-primary/10 border border-primary/20"
-                      : "hover:bg-secondary"
-                  )}
+                  className="w-full p-2 rounded-lg hover:bg-secondary"
                 >
                   <button
                     onClick={() => handleSelect(server)}
                     className="w-full flex items-center gap-3 text-left"
                   >
-                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center overflow-hidden">
                       {iconUrl(server) ? (
                         <img
                           src={iconUrl(server)!}
@@ -192,56 +200,49 @@ const inviteBot = (serverId: string) => {
                       )}
                     </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium truncate">
-                          {server.server_name}
-                        </p>
-                        {selectedRow && (
-                          <Check className="w-4 h-4 text-primary shrink-0" />
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium truncate">
+                        {server.server_name}
+                      </p>
+                      <div className="text-xs text-muted-foreground flex gap-2">
                         <Users className="w-3 h-3" />
-                        <span>
-                          {typeof server.member_count === "number"
-                            ? server.member_count.toLocaleString()
-                            : "—"}
-                        </span>
-                        {server.bot_connected === true && (
-                          <span className="text-success">• Connected</span>
-                        )}
-                        {server.bot_connected === false && (
-                          <span className="text-warning">• Not connected</span>
-                        )}
+                        {server.bot_connected ? "Connected" : "Not connected"}
                       </div>
                     </div>
+
+                    {server.bot_connected && (
+                      <Check className="w-4 h-4 text-success" />
+                    )}
                   </button>
 
-                 {server.bot_connected === false && server.can_invite_bot === true && (
-                    <Button
-                      variant="hero"
-                      size="sm"
-                      className="w-full mt-2"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        inviteBot(server.discord_server_id);
-                      }}
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add Bot
-                    </Button>
-                  )}
+                  {server.bot_connected === false &&
+                    server.can_invite_bot && (
+                      <Button
+                        variant="hero"
+                        size="sm"
+                        className="w-full mt-2"
+                        disabled={installing}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          inviteBot(server.discord_server_id);
+                        }}
+                      >
+                        {installing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                            Installing…
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Bot
+                          </>
+                        )}
+                      </Button>
+                    )}
                 </div>
               );
             })}
-
-            {!loading && servers.length === 0 && (
-              <div className="px-3 py-2 text-sm text-muted-foreground">
-                No servers found
-              </div>
-            )}
           </div>
         </div>
       )}

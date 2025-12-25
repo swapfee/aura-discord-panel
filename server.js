@@ -66,6 +66,16 @@ function hasAdminPermissions(permissions){
   }
 }
 
+function timeAgo(date) {
+  const seconds = Math.floor((Date.now() - new Date(date)) / 1000);
+  const mins = Math.floor(seconds / 60);
+  if (mins < 1) return "Now Playing";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ago`;
+}
+
+
 async function requireUser(req) {
   const token = req.cookies.session;
   if (!token) return null;
@@ -244,20 +254,20 @@ app.get("/api/servers", async (req, res) => {
   for (const g of userGuilds) {
     let memberCount = null;
 
-    if (botGuildIds.has(g.id)) {
+    const botConnected = botGuildIds.has(g.id);
+    const canInviteBot = hasAdminPermissions(g.permissions);
+
+    if (botConnected) {
       try {
         const guildRes = await fetch(
           `https://discord.com/api/guilds/${g.id}?with_counts=true`,
           {
-            headers: {
-              Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
-            },
+            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
           }
         );
 
-        const guildData = await guildRes.json(); // ✅ READ ONCE
-
         if (guildRes.ok) {
+          const guildData = await guildRes.json();
           memberCount =
             guildData.approximate_member_count ??
             guildData.member_count ??
@@ -274,14 +284,13 @@ app.get("/api/servers", async (req, res) => {
       server_name: g.name,
       server_icon: g.icon,
       member_count: memberCount,
-      bot_connected: botGuildIds.has(g.id),
-      can_invite_bot: (g.permissions & 0x20) === 0x20, // MANAGE_GUILD
+      bot_connected: botConnected,
+      can_invite_bot: canInviteBot,
     });
   }
 
   res.json({ servers });
 });
-
 
 
 app.post("/api/servers/sync", async (req, res) => {
@@ -290,6 +299,128 @@ app.post("/api/servers/sync", async (req, res) => {
 
   return res.json({ ok: true });
 });
+
+app.get("/api/servers/:serverId/overview", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
+
+  const { serverId } = req.params;
+
+  try {
+    // These models come from the BOT database
+    const SongPlay = mongoose.model("SongPlay");
+    const VoiceSession = mongoose.model("VoiceSession");
+    const Queue = mongoose.model("Queue");
+
+    // Songs played (all-time)
+    const songsPlayed = await SongPlay.countDocuments({
+      guildId: serverId,
+    });
+
+    // Listening time (sum voice sessions)
+    const sessions = await VoiceSession.find({
+      guildId: serverId,
+    });
+
+    const listeningTimeMinutes = sessions.reduce((sum, s) => {
+      if (!s.joinedAt) return sum;
+      const end = s.leftAt ? new Date(s.leftAt) : new Date();
+      return sum + Math.floor((end - s.joinedAt) / 60000);
+    }, 0);
+
+    // Active listeners (currently in voice)
+    const activeListeners = await VoiceSession.countDocuments({
+      guildId: serverId,
+      leftAt: { $exists: false },
+    });
+
+    // Queue length
+    const queue = await Queue.findOne({ guildId: serverId });
+    const queueLength = queue?.tracks?.length ?? 0;
+
+    res.json({
+      songsPlayed,
+      listeningTimeMinutes,
+      activeListeners,
+      queueLength,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load overview data" });
+  }
+});
+
+app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
+
+  const { serverId } = req.params;
+
+  try {
+    const SongPlay = mongoose.model("SongPlay");
+
+    const plays = await SongPlay.find({ guildId: serverId })
+      .sort({ playedAt: -1 })
+      .limit(10)
+      .lean();
+
+    const tracks = plays.map((p) => ({
+      title: p.title,
+      artist: p.artist,
+      cover: p.coverUrl ?? null,
+      playedAt: timeAgo(p.playedAt),
+    }));
+
+    res.json({ tracks });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load recent activity" });
+  }
+});
+
+app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
+
+  const { serverId } = req.params;
+
+  try {
+    const VoiceSession = mongoose.model("VoiceSession");
+
+    const sessions = await VoiceSession.find({
+      guildId: serverId,
+    }).lean();
+
+    const totals = new Map();
+
+    for (const s of sessions) {
+      if (!s.userId || !s.joinedAt) continue;
+
+      const end = s.leftAt ? new Date(s.leftAt) : new Date();
+      const minutes = Math.floor((end - new Date(s.joinedAt)) / 60000);
+
+      totals.set(
+        s.userId,
+        (totals.get(s.userId) ?? 0) + Math.max(0, minutes)
+      );
+    }
+
+    const top = [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([userId, minutes], index) => ({
+        userId,
+        listenTimeMinutes: minutes,
+        rank: index + 1,
+      }));
+
+    res.json({ listeners: top });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load top listeners" });
+  }
+});
+
 
 
 

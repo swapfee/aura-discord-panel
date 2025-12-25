@@ -1,55 +1,104 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  Play, Clock, Music, Users, TrendingUp, Headphones,
-  BarChart3
+import {
+  Play,
+  Clock,
+  Music,
+  Users,
+  TrendingUp,
+  Headphones,
+  BarChart3,
+  Loader2,
 } from "lucide-react";
+import { useBot } from "@/contexts/BotContext";
 
-const stats = [
-  { label: "Songs Played", value: "1,247", icon: Music, change: "+12%" },
-  { label: "Listening Time", value: "48h 23m", icon: Clock, change: "+8%" },
-  { label: "Active Listeners", value: "23", icon: Users, change: "+5" },
-  { label: "Queue Length", value: "15", icon: BarChart3, change: "" },
-];
+type OverviewStats = {
+  songsPlayed: number;
+  listeningTimeMinutes: number;
+  activeListeners: number;
+  queueLength: number;
+};
 
-const recentTracks = [
-  { title: "Blinding Lights", artist: "The Weeknd", playedAt: "Now Playing", cover: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=100&h=100&fit=crop" },
-  { title: "Starboy", artist: "The Weeknd", playedAt: "2 min ago", cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop" },
-  { title: "Levitating", artist: "Dua Lipa", playedAt: "5 min ago", cover: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100&h=100&fit=crop" },
-  { title: "Save Your Tears", artist: "The Weeknd", playedAt: "9 min ago", cover: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&h=100&fit=crop" },
-  { title: "Don't Start Now", artist: "Dua Lipa", playedAt: "13 min ago", cover: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=100&h=100&fit=crop" },
-];
+export default function DashboardOverview() {
+  const { currentServerId } = useBot();
 
-const topListeners = [
-  { name: "Alex", avatar: "A", listenTime: "4h 23m" },
-  { name: "Jordan", avatar: "J", listenTime: "3h 45m" },
-  { name: "Sam", avatar: "S", listenTime: "2h 12m" },
-  { name: "Casey", avatar: "C", listenTime: "1h 56m" },
-];
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [loading, setLoading] = useState(false);
 
-const DashboardOverview = () => {
+  useEffect(() => {
+    if (!currentServerId) return;
+
+    setLoading(true);
+    fetch(`/api/servers/${currentServerId}/overview`, {
+      credentials: "include",
+    })
+      .then((res) => res.json())
+      .then((data) => setStats(data))
+      .finally(() => setLoading(false));
+  }, [currentServerId]);
+
+  if (!currentServerId) {
+    return (
+      <div className="text-muted-foreground">
+        Select a server to view dashboard data.
+      </div>
+    );
+  }
+
+  if (loading || !stats) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+
+  const statCards = [
+    {
+      label: "Songs Played",
+      value: stats.songsPlayed.toLocaleString(),
+      icon: Music,
+    },
+    {
+      label: "Listening Time",
+      value: `${Math.floor(stats.listeningTimeMinutes / 60)}h ${
+        stats.listeningTimeMinutes % 60
+      }m`,
+      icon: Clock,
+    },
+    {
+      label: "Active Listeners",
+      value: stats.activeListeners,
+      icon: Users,
+    },
+    {
+      label: "Queue Length",
+      value: stats.queueLength,
+      icon: BarChart3,
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground mb-2">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back! Here's what's happening in your server.</p>
+        <h1 className="text-2xl font-bold mb-2">Dashboard</h1>
+        <p className="text-muted-foreground">
+          Here’s what’s happening in your server.
+        </p>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
+        {statCards.map((stat) => (
           <Card key={stat.label} variant="stat">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground mb-1">{stat.label}</p>
-                <p className="text-2xl font-bold text-foreground">{stat.value}</p>
-                {stat.change && (
-                  <p className="text-xs text-success mt-1">
-                    <TrendingUp className="w-3 h-3 inline mr-1" />
-                    {stat.change}
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  {stat.label}
+                </p>
+                <p className="text-2xl font-bold">{stat.value}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
                 <stat.icon className="w-6 h-6 text-primary" />
               </div>
             </div>
@@ -57,66 +106,7 @@ const DashboardOverview = () => {
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Recent Tracks */}
-        <Card variant="glass" className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Headphones className="w-5 h-5 text-primary" />
-              Recent Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recentTracks.map((track, index) => (
-              <div 
-                key={index}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50 transition-colors group cursor-pointer"
-              >
-                <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0">
-                  <img src={track.cover} alt={track.title} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-background/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Play className="w-5 h-5 text-foreground" />
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{track.title}</p>
-                  <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
-                </div>
-                <span className="text-xs text-muted-foreground shrink-0">{track.playedAt}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Top Listeners */}
-        <Card variant="glass">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-primary" />
-              Top Listeners
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {topListeners.map((listener, index) => (
-              <div 
-                key={index}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50 transition-colors"
-              >
-                <div className="w-10 h-10 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-medium text-primary">{listener.avatar}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{listener.name}</p>
-                  <p className="text-xs text-muted-foreground">{listener.listenTime} today</p>
-                </div>
-                <span className="text-xs text-muted-foreground">#{index + 1}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+      {/* You will plug Recent Activity + Top Listeners here next */}
     </div>
   );
-};
-
-export default DashboardOverview;
+}

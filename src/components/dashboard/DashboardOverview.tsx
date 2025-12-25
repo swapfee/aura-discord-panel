@@ -50,7 +50,7 @@ export default function DashboardOverview() {
   const [listenersLoading, setListenersLoading] = useState(false);
 
   /* ======================
-     LOAD OVERVIEW STATS (FIX)
+     LOAD OVERVIEW STATS (REST – REQUIRED)
   ====================== */
   useEffect(() => {
     if (!currentServerId) return;
@@ -108,7 +108,6 @@ export default function DashboardOverview() {
     };
 
     ws.onerror = () => ws.close();
-
     return () => ws.close();
   }, [currentServerId, stats]);
 
@@ -191,6 +190,7 @@ export default function DashboardOverview() {
   ====================== */
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold mb-2">Dashboard</h1>
         <p className="text-muted-foreground">
@@ -198,12 +198,15 @@ export default function DashboardOverview() {
         </p>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
           <Card key={stat.label} variant="stat">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
+                <p className="text-sm text-muted-foreground">
+                  {stat.label}
+                </p>
                 <p className="text-2xl font-bold">{stat.value}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -214,8 +217,112 @@ export default function DashboardOverview() {
         ))}
       </div>
 
-      {/* Recent Activity + Top Listeners unchanged */}
-      {/* (rest of your render code stays exactly the same) */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Recent Activity */}
+        <Card variant="glass" className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Headphones className="w-5 h-5 text-primary" />
+              Recent Activity
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {activityLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            )}
+
+            {!activityLoading && recentTracks.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No tracks played yet
+              </div>
+            )}
+
+            {recentTracks.map((track, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+              >
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-secondary">
+                  {track.cover ? (
+                    <img
+                      src={track.cover}
+                      alt={track.title}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Play className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {track.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {track.artist}
+                  </p>
+                </div>
+
+                <span className="text-xs text-muted-foreground">
+                  {track.playedAt}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Top Listeners */}
+        <Card variant="glass">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary" />
+              Top Listeners
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {listenersLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            )}
+
+            {!listenersLoading && topListeners.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No listener data yet
+              </div>
+            )}
+
+            {topListeners.map((l) => (
+              <div
+                key={l.userId}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary">
+                    #{l.rank}
+                  </span>
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-sm font-medium">
+                    User {l.userId.slice(0, 6)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.floor(l.listenTimeMinutes / 60)}h{" "}
+                    {l.listenTimeMinutes % 60}m
+                  </p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

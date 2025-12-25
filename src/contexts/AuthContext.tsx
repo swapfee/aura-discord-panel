@@ -7,13 +7,9 @@ import {
   ReactNode,
   useCallback,
 } from "react";
+import { AuthUser, ApiMeResponse } from "@/types/auth";
 
-export type AuthUser = {
-  id: string;
-  username: string;
-  email?: string | null;
-  avatar?: string | null;
-};
+
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -23,9 +19,11 @@ type AuthContextType = {
   refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
 };
 
+
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function normalizeUser(raw: any): AuthUser | null {
+function normalizeUser(raw: ApiMeResponse["user"] | null | undefined): AuthUser | null {
   if (!raw) return null;
 
   const id = raw.id ?? raw.sub;
@@ -41,47 +39,37 @@ function normalizeUser(raw: any): AuthUser | null {
   };
 }
 
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      const silent = opts?.silent ?? false;
-      if (!silent) setLoading(true);
+ const refreshUser = useCallback(
+  async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
 
-      try {
-        const r = await fetch("/api/me", {
-          credentials: "include",
-          cache: "no-store",
-        });
+    try {
+      const r = await fetch("/api/me", {
+        credentials: "include",
+        cache: "no-store",
+      });
 
-        // ❗ Not authenticated
-        if (r.status === 401 || r.status === 403) {
-          setUser(null);
-          return;
-        }
-
-        // ❗ 304 = no body, do NOT parse JSON
-        if (r.status === 304) {
-          return;
-        }
-
-        if (!r.ok) {
-          setUser(null);
-          return;
-        }
-
+      if (r.ok) {
         const data = await r.json();
         setUser(normalizeUser(data?.user));
-      } catch {
+      } else {
         setUser(null);
-      } finally {
-        if (!silent) setLoading(false);
       }
-    },
-    []
-  );
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false); // 🔑 ALWAYS clear loading
+    }
+  },
+  []
+);
+
 
   // Initial auth check
   useEffect(() => {

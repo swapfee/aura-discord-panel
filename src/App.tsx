@@ -9,6 +9,7 @@ import { BotProvider } from "@/contexts/BotContext";
 import LandingPage from "./pages/LandingPage";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
+import BotInstalled from "./pages/BotInstalled";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/bot/installed" element={<BotInstalled />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BotProvider>

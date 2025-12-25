@@ -59,17 +59,16 @@ export default function Dashboard() {
     if (!loading && !user) navigate("/");
   }, [loading, user, navigate]);
 
-  // Fetch servers
-  useEffect(() => {
-    if (!user) return;
+useEffect(() => {
+  if (!user) return;
 
-    setServersLoading(true);
-    fetch("/api/servers", { credentials: "include" })
-      .then((r) => r.json())
-      .then((d) => setServers(Array.isArray(d.servers) ? d.servers : []))
-      .catch(() => setServers([]))
-      .finally(() => setServersLoading(false));
-  }, [user]);
+  setServersLoading(true);
+  fetch("/api/servers", { credentials: "include" })
+    .then((res) => res.json())
+    .then((data) => setServers(data.servers ?? []))
+    .finally(() => setServersLoading(false));
+}, [user]);
+
 
   if (loading) {
     return (

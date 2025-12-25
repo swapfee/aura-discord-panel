@@ -50,12 +50,35 @@ export default function ServerSelector({
       ? `https://cdn.discordapp.com/icons/${s.discord_server_id}/${s.server_icon}.png?size=64`
       : null;
 
-  const inviteBot = (serverId: string) => {
-    if (!DISCORD_CLIENT_ID) return;
+const inviteBot = (serverId: string) => {
+  if (!DISCORD_CLIENT_ID) return;
 
-    const url = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&permissions=8&scope=bot%20applications.commands&guild_id=${serverId}&disable_guild_select=true`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
+  const redirectUri = encodeURIComponent(
+    `${window.location.origin}/bot-installed`
+  );
+
+  const url =
+    `https://discord.com/oauth2/authorize` +
+    `?client_id=${DISCORD_CLIENT_ID}` +
+    `&permissions=8` +
+    `&scope=bot%20applications.commands` +
+    `&guild_id=${serverId}` +
+    `&disable_guild_select=true` +
+    `&redirect_uri=${redirectUri}` +
+    `&response_type=code`;
+
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+
+  const timer = setInterval(() => {
+    if (!popup || popup.closed) {
+      clearInterval(timer);
+      // Trigger refresh after install
+      window.location.reload();
+    }
+  }, 1000);
+};
+
+
 
   if (collapsed) {
     return (

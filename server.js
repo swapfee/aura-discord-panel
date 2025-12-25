@@ -264,6 +264,14 @@ app.get("/api/servers", async (req, res) => {
   res.json({ servers });
 });
 
+app.post("/api/servers/sync", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).json({ ok: false });
+
+  return res.json({ ok: true });
+});
+
+
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());

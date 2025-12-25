@@ -373,26 +373,42 @@ app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
 app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
-  const sessions = await VoiceSession.find({ guildId: req.params.serverId }).lean();
+
+  const sessions = await VoiceSession.find({
+    guildId: req.params.serverId,
+  }).lean();
 
   const totals = new Map();
+
   for (const s of sessions) {
+    if (!s.userId || !s.joinedAt) continue;
+
     const end = s.leftAt ? new Date(s.leftAt) : new Date();
     const mins = Math.floor((end - new Date(s.joinedAt)) / 60000);
-    totals.set(s.userId, (totals.get(s.userId) ?? 0) + mins);
+
+    const prev = totals.get(s.userId) ?? {
+      userId: s.userId,
+      username: s.username ?? "Unknown",
+      minutes: 0,
+    };
+
+    prev.minutes += Math.max(0, mins);
+    totals.set(s.userId, prev);
   }
 
-  res.json({
-    listeners: [...totals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([userId, minutes], i) => ({
-        userId,
-        listenTimeMinutes: minutes,
-        rank: i + 1,
-      })),
-  });
+  const listeners = [...totals.values()]
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, 5)
+    .map((u, i) => ({
+      userId: u.userId,
+      username: u.username,
+      listenTimeMinutes: u.minutes,
+      rank: i + 1,
+    }));
+
+  res.json({ listeners });
 });
+
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());

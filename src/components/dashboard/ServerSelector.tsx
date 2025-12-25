@@ -21,6 +21,7 @@ interface ServerSelectorProps {
 }
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
+const STORAGE_KEY = "aura:lastServerId";
 
 export default function ServerSelector({
   servers,
@@ -32,23 +33,42 @@ export default function ServerSelector({
   const [selected, setSelected] = useState<Server | null>(null);
 
   /* ======================
-     AUTO SELECT FIRST THAT MAKES SENSE 
+     RESTORE SELECTION
   ====================== */
-useEffect(() => {
-  if (selected || servers.length === 0) return;
+  useEffect(() => {
+    if (servers.length === 0) return;
 
-  // 1️⃣ Prefer a server where the bot is already connected
-  const botServer = servers.find((s) => s.bot_connected === true);
+    const savedId = localStorage.getItem(STORAGE_KEY);
 
-  const serverToSelect = botServer ?? servers[0];
+    // 1️⃣ Restore saved server if it still exists
+    if (savedId) {
+      const match = servers.find(
+        (s) => s.discord_server_id === savedId
+      );
+      if (match) {
+        setSelected(match);
+        onServerChange(match.discord_server_id);
+        return;
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
 
-  setSelected(serverToSelect);
-  onServerChange(serverToSelect.discord_server_id);
-}, [servers, selected, onServerChange]);
+    // 2️⃣ Prefer bot-connected server
+    const botServer = servers.find((s) => s.bot_connected === true);
 
+    const fallback = botServer ?? servers[0];
 
+    setSelected(fallback);
+    onServerChange(fallback.discord_server_id);
+  }, [servers, onServerChange]);
+
+  /* ======================
+     HANDLE SELECT
+  ====================== */
   const handleSelect = (server: Server) => {
     setSelected(server);
+    localStorage.setItem(STORAGE_KEY, server.discord_server_id);
     onServerChange(server.discord_server_id);
     setIsOpen(false);
   };
@@ -83,7 +103,7 @@ useEffect(() => {
     const timer = setInterval(() => {
       if (!popup || popup.closed) {
         clearInterval(timer);
-        window.location.reload(); // auto-refresh after install
+        window.location.reload();
       }
     }, 1000);
   };
@@ -176,7 +196,8 @@ useEffect(() => {
         <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
           <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
             {servers.map((server) => {
-              const selectedRow = selected?.id === server.id;
+              const selectedRow =
+                selected?.discord_server_id === server.discord_server_id;
 
               return (
                 <div
@@ -216,7 +237,6 @@ useEffect(() => {
                         )}
                       </div>
 
-                      {/* ✅ CONNECTED STATUS RESTORED */}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Users className="w-3 h-3" />
                         <span>
@@ -234,7 +254,6 @@ useEffect(() => {
                     </div>
                   </button>
 
-                  {/* ✅ ADD BOT (PERMISSION AWARE) */}
                   {server.bot_connected === false &&
                     server.can_invite_bot === true && (
                       <Button
@@ -253,12 +272,6 @@ useEffect(() => {
                 </div>
               );
             })}
-
-            {!loading && servers.length === 0 && (
-              <div className="px-3 py-2 text-sm text-muted-foreground">
-                No servers found
-              </div>
-            )}
           </div>
         </div>
       )}

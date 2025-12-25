@@ -10,7 +10,7 @@ import mongoose from "mongoose";
 import { encrypt, decrypt } from "./src/lib/crypto.js";
 import { DiscordToken } from "./src/models/DiscordToken.js";
 
-// ✅ BOT MODELS (READ-ONLY)
+// 🤖 BOT MODELS (READ-ONLY)
 import { registerSongPlay } from "./src/bot-models/SongPlay.js";
 import { registerVoiceSession } from "./src/bot-models/VoiceSession.js";
 import { registerQueue } from "./src/bot-models/Queue.js";
@@ -23,6 +23,10 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 app.use(cookieParser());
+
+/* ======================
+   ENV
+====================== */
 
 const {
   DISCORD_CLIENT_ID,
@@ -58,7 +62,7 @@ await mongoose.connect(MONGO_URL);
 // 🤖 Bot DB (analytics)
 const botDb = mongoose.createConnection(BOT_MONGO_URL);
 
-// Register bot models ON BOT DB
+// Register bot models on BOT DB ONLY
 const SongPlay = registerSongPlay(botDb);
 const VoiceSession = registerVoiceSession(botDb);
 const Queue = registerQueue(botDb);
@@ -82,16 +86,14 @@ const ADMINISTRATOR_PERMISSION = 1n << 3n;
 
 function hasAdminPermissions(permissions) {
   try {
-    const perms = BigInt(permissions);
-    return (perms & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+    return (BigInt(permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
   } catch {
     return false;
   }
 }
 
 function timeAgo(date) {
-  const seconds = Math.floor((Date.now() - new Date(date)) / 1000);
-  const mins = Math.floor(seconds / 60);
+  const mins = Math.floor((Date.now() - new Date(date)) / 60000);
   if (mins < 1) return "Now Playing";
   if (mins < 60) return `${mins} min ago`;
   return `${Math.floor(mins / 60)}h ago`;
@@ -164,8 +166,8 @@ async function refreshDiscordToken(refreshToken) {
     body,
   });
 
-  const data = await r.json();
   if (!r.ok) throw new Error("Failed to refresh token");
+  const data = await r.json();
 
   return {
     accessToken: data.access_token,
@@ -233,18 +235,59 @@ app.get(
       .setExpirationTime("2h")
       .sign(JWT_KEY);
 
-    res.cookie("session", jwt, {
-      ...cookieOpts(),
-      maxAge: 2 * 60 * 60 * 1000,
-    });
-
+    res.cookie("session", jwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
     res.redirect("/dashboard");
   }
 );
 
 /* ======================
-   API — OVERVIEW
+   API
 ====================== */
+
+app.get("/api/me", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).json({ user: null });
+  res.json({ user });
+});
+
+app.get("/api/servers", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).json({ servers: [] });
+
+  let tokens = await getDiscordTokens(user.sub);
+  if (!tokens) return res.json({ servers: [] });
+
+  if (isExpired(tokens.expiresAt)) {
+    const refreshed = await refreshDiscordToken(tokens.refreshToken);
+    await saveDiscordTokens({ userId: user.sub, ...refreshed });
+    tokens = refreshed;
+  }
+
+  const [userGuildsRes, botGuildsRes] = await Promise.all([
+    fetch("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    }),
+    fetch("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    }),
+  ]);
+
+  const userGuilds = await userGuildsRes.json();
+  const botGuilds = await botGuildsRes.json();
+
+  const botGuildIds = new Set(botGuilds.map(g => g.id));
+
+  const servers = userGuilds.map(g => ({
+    id: g.id,
+    discord_server_id: g.id,
+    server_name: g.name,
+    server_icon: g.icon,
+    bot_connected: botGuildIds.has(g.id),
+    can_invite_bot: hasAdminPermissions(g.permissions),
+  }));
+
+  res.json({ servers });
+});
 
 app.get("/api/servers/:serverId/overview", async (req, res) => {
   const user = await requireUser(req);
@@ -252,38 +295,77 @@ app.get("/api/servers/:serverId/overview", async (req, res) => {
 
   const { serverId } = req.params;
 
-  try {
-    const songsPlayed = await SongPlay.countDocuments({ guildId: serverId });
+  const songsPlayed = await SongPlay.countDocuments({ guildId: serverId });
+  const sessions = await VoiceSession.find({ guildId: serverId }).lean();
 
-    const sessions = await VoiceSession.find({ guildId: serverId }).lean();
+  const listeningTimeMinutes = sessions.reduce((sum, s) => {
+    const end = s.leftAt ? new Date(s.leftAt) : new Date();
+    return sum + Math.floor((end - new Date(s.joinedAt)) / 60000);
+  }, 0);
 
-    const listeningTimeMinutes = sessions.reduce((sum, s) => {
-      if (!s.joinedAt) return sum;
-      const end = s.leftAt ? new Date(s.leftAt) : new Date();
-      return sum + Math.floor((end - new Date(s.joinedAt)) / 60000);
-    }, 0);
+  const activeListeners = await VoiceSession.countDocuments({
+    guildId: serverId,
+    leftAt: null,
+  });
 
-    const activeListeners = await VoiceSession.countDocuments({
-      guildId: serverId,
-      leftAt: null,
-    });
+  const queue = await Queue.findOne({ guildId: serverId }).lean();
 
-    const queue = await Queue.findOne({ guildId: serverId }).lean();
+  res.json({
+    songsPlayed,
+    listeningTimeMinutes,
+    activeListeners,
+    queueLength: queue?.tracks?.length ?? 0,
+  });
+});
 
-    res.json({
-      songsPlayed,
-      listeningTimeMinutes,
-      activeListeners,
-      queueLength: queue?.tracks?.length ?? 0,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to load overview data" });
+app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
+
+  const plays = await SongPlay.find({ guildId: req.params.serverId })
+    .sort({ playedAt: -1 })
+    .limit(10)
+    .lean();
+
+  res.json({
+    tracks: plays.map(p => ({
+      title: p.title,
+      artist: p.artist,
+      cover: p.coverUrl ?? null,
+      playedAt: timeAgo(p.playedAt),
+    })),
+  });
+});
+
+app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
+  const sessions = await VoiceSession.find({ guildId: req.params.serverId }).lean();
+
+  const totals = new Map();
+  for (const s of sessions) {
+    const end = s.leftAt ? new Date(s.leftAt) : new Date();
+    const mins = Math.floor((end - new Date(s.joinedAt)) / 60000);
+    totals.set(s.userId, (totals.get(s.userId) ?? 0) + mins);
   }
+
+  res.json({
+    listeners: [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([userId, minutes], i) => ({
+        userId,
+        listenTimeMinutes: minutes,
+        rank: i + 1,
+      })),
+  });
+});
+
+app.post("/auth/logout", (_req, res) => {
+  res.clearCookie("session", cookieOpts());
+  res.status(204).end();
 });
 
 /* ======================
-   FRONTEND
+   FRONTEND (LAST)
 ====================== */
 
 const distPath = path.join(__dirname, "dist");

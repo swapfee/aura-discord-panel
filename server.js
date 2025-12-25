@@ -386,28 +386,49 @@ app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
     const end = s.leftAt ? new Date(s.leftAt) : new Date();
     const mins = Math.floor((end - new Date(s.joinedAt)) / 60000);
 
-    const prev = totals.get(s.userId) ?? {
-      userId: s.userId,
-      username: s.username ?? "Unknown",
-      minutes: 0,
-    };
-
-    prev.minutes += Math.max(0, mins);
-    totals.set(s.userId, prev);
+    totals.set(
+      s.userId,
+      (totals.get(s.userId) ?? 0) + Math.max(0, mins)
+    );
   }
 
-  const listeners = [...totals.values()]
-    .sort((a, b) => b.minutes - a.minutes)
-    .slice(0, 5)
-    .map((u, i) => ({
-      userId: u.userId,
-      username: u.username,
-      listenTimeMinutes: u.minutes,
-      rank: i + 1,
-    }));
+  const topRaw = [...totals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  // 🔥 Fetch usernames from Discord
+  const listeners = await Promise.all(
+    topRaw.map(async ([userId, minutes], index) => {
+      let username = null;
+
+      try {
+        const r = await fetch(
+          `https://discord.com/api/users/${userId}`,
+          {
+            headers: {
+              Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+            },
+          }
+        );
+
+        if (r.ok) {
+          const u = await r.json();
+          username = u.username;
+        }
+      } catch {}
+
+      return {
+        userId,
+        username,
+        listenTimeMinutes: minutes,
+        rank: index + 1,
+      };
+    })
+  );
 
   res.json({ listeners });
 });
+
 
 
 app.post("/auth/logout", (_req, res) => {

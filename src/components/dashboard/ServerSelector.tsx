@@ -10,7 +10,9 @@ export type Server = {
   server_icon?: string | null;
   member_count?: number | null;
   bot_connected?: boolean | null;
+  can_invite_bot?: boolean | null; 
 };
+
 
 interface ServerSelectorProps {
   servers: Server[];
@@ -194,7 +196,7 @@ export default function ServerSelector({
                     </div>
                   </button>
 
-                  {server.bot_connected === false && (
+                 {server.bot_connected === false && server.can_invite_bot === true && (
                     <Button
                       variant="hero"
                       size="sm"

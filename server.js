@@ -221,9 +221,17 @@ app.get("/api/servers", async (req, res) => {
   const botGuilds = await botGuildsRes.json();
   const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
+  const ADMIN = 1 << 3;
+  const MANAGE_GUILD = 1 << 5;
+
   const servers = [];
 
   for (const g of userGuilds) {
+    const permissions = Number(g.permissions);
+    const canInviteBot =
+      (permissions & ADMIN) === ADMIN ||
+      (permissions & MANAGE_GUILD) === MANAGE_GUILD;
+
     let memberCount = null;
 
     if (botGuildIds.has(g.id)) {
@@ -231,9 +239,7 @@ app.get("/api/servers", async (req, res) => {
         const guildRes = await fetch(
           `https://discord.com/api/guilds/${g.id}?with_counts=true`,
           {
-            headers: {
-              Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
-            },
+            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
           }
         );
 
@@ -241,9 +247,7 @@ app.get("/api/servers", async (req, res) => {
           const guildData = await guildRes.json();
           memberCount = guildData.approximate_member_count ?? null;
         }
-      } catch {
-        memberCount = null;
-      }
+      } catch {}
     }
 
     servers.push({
@@ -253,11 +257,13 @@ app.get("/api/servers", async (req, res) => {
       server_icon: g.icon,
       member_count: memberCount,
       bot_connected: botGuildIds.has(g.id),
+      can_invite_bot: canInviteBot, // ✅ NEW
     });
   }
 
   res.json({ servers });
 });
+
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());

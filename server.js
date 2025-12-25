@@ -303,28 +303,53 @@ app.get("/api/servers/:serverId/overview", async (req, res) => {
 
   const { serverId } = req.params;
 
-  const songsPlayed = await SongPlay.countDocuments({ guildId: serverId });
-  const sessions = await VoiceSession.find({ guildId: serverId }).lean();
+  try {
+    const songsPlayed = await SongPlay.countDocuments({ guildId: serverId });
 
-  const listeningTimeMinutes = sessions.reduce((sum, s) => {
-    const end = s.leftAt ? new Date(s.leftAt) : new Date();
-    return sum + Math.floor((end - new Date(s.joinedAt)) / 60000);
-  }, 0);
+    const sessions = await VoiceSession.find({
+      guildId: serverId,
+      joinedAt: { $exists: true, $ne: null },
+    }).lean();
 
-  const activeListeners = await VoiceSession.countDocuments({
-    guildId: serverId,
-    leftAt: null,
-  });
+    let listeningTimeMinutes = 0;
 
-  const queue = await Queue.findOne({ guildId: serverId }).lean();
+    for (const s of sessions) {
+      const joined = new Date(s.joinedAt);
+      if (Number.isNaN(joined.getTime())) continue;
 
-  res.json({
-    songsPlayed,
-    listeningTimeMinutes,
-    activeListeners,
-    queueLength: queue?.tracks?.length ?? 0,
-  });
+      const end = s.leftAt ? new Date(s.leftAt) : new Date();
+      if (Number.isNaN(end.getTime())) continue;
+
+      listeningTimeMinutes += Math.max(
+        0,
+        Math.floor((end - joined) / 60000)
+      );
+    }
+
+    const activeListeners = await VoiceSession.countDocuments({
+      guildId: serverId,
+      $or: [{ leftAt: null }, { leftAt: { $exists: false } }],
+    });
+
+    const queue = await Queue.findOne({ guildId: serverId }).lean();
+
+    return res.json({
+      songsPlayed,
+      listeningTimeMinutes,
+      activeListeners,
+      queueLength: queue?.tracks?.length ?? 0,
+    });
+  } catch (err) {
+    console.error("[OVERVIEW ERROR]", err);
+    return res.status(500).json({
+      songsPlayed: 0,
+      listeningTimeMinutes: 0,
+      activeListeners: 0,
+      queueLength: 0,
+    });
+  }
 });
+
 
 app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
   const user = await requireUser(req);

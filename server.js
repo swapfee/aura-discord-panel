@@ -99,6 +99,18 @@ function timeAgo(date) {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
+function broadcastToGuild(guildId, payload) {
+  for (const client of wss.clients) {
+    if (
+      client.readyState === 1 &&
+      client.guildId === guildId
+    ) {
+      client.send(JSON.stringify(payload));
+    }
+  }
+}
+
+
 async function requireUser(req) {
   const token = req.cookies.session;
   if (!token) return null;
@@ -374,6 +386,87 @@ app.get("*", (_, res) =>
   res.sendFile(path.join(distPath, "index.html"))
 );
 
-app.listen(Number(PORT || 3000), "0.0.0.0", () =>
+const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
   console.log("Server running")
 );
+
+/* ======================
+   WEBSOCKETS — LIVE STATS
+====================== */
+
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", async (ws, req) => {
+  try {
+    // Extract session cookie
+    const cookies = req.headers.cookie ?? "";
+    const session = cookies
+      .split(";")
+      .find(c => c.trim().startsWith("session="))
+      ?.split("=")[1];
+
+    if (!session) {
+      ws.close();
+      return;
+    }
+
+    // Verify JWT
+    const { payload } = await jwtVerify(session, JWT_KEY);
+
+    ws.userId = payload.sub;
+    ws.guildId = null;
+
+    ws.send(JSON.stringify({ type: "connected" }));
+  } catch {
+    ws.close();
+  }
+
+  ws.on("message", msg => {
+    try {
+      const data = JSON.parse(msg.toString());
+
+      if (data.type === "subscribe") {
+        ws.guildId = data.guildId;
+      }
+    } catch {}
+  });
+});
+
+/* ======================
+   INTERNAL BOT EVENTS
+====================== */
+
+app.post("/api/internal/song-played", (req, res) => {
+  const { guildId, title, artist } = req.body;
+
+  broadcastToGuild(guildId, {
+    type: "song_played",
+    title,
+    artist,
+  });
+
+  res.json({ ok: true });
+});
+
+app.post("/api/internal/queue-update", (req, res) => {
+  const { guildId, queueLength } = req.body;
+
+  broadcastToGuild(guildId, {
+    type: "queue_update",
+    queueLength,
+  });
+
+  res.json({ ok: true });
+});
+
+app.post("/api/internal/voice-update", (req, res) => {
+  const { guildId, activeListeners } = req.body;
+
+  broadcastToGuild(guildId, {
+    type: "voice_update",
+    activeListeners,
+  });
+
+  res.json({ ok: true });
+});
+

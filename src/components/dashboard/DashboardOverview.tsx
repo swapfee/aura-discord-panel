@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Play,
@@ -10,6 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useBot } from "@/contexts/BotContext";
+c
 
 /* ======================
    TYPES
@@ -39,6 +40,7 @@ type TopListener = {
 ====================== */
 export default function DashboardOverview() {
   const { currentServerId } = useBot();
+  const wsRef = useRef<WebSocket | null>(null);
 
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [recentTracks, setRecentTracks] = useState<RecentTrack[]>([]);
@@ -51,17 +53,63 @@ export default function DashboardOverview() {
   /* ======================
      LOAD OVERVIEW STATS
   ====================== */
-  useEffect(() => {
-    if (!currentServerId) return;
+useEffect(() => {
+  if (!currentServerId) return;
 
-    setStatsLoading(true);
-    fetch(`/api/servers/${currentServerId}/overview`, {
-      credentials: "include",
-    })
-      .then((res) => res.json())
-      .then((data) => setStats(data))
-      .finally(() => setStatsLoading(false));
-  }, [currentServerId]);
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${protocol}://${location.host}`);
+
+  wsRef.current = ws;
+
+  ws.onopen = () => {
+    ws.send(
+      JSON.stringify({
+        type: "subscribe",
+        guildId: currentServerId,
+      })
+    );
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+
+    setStats((prev) => {
+      if (!prev) return prev;
+
+      switch (data.type) {
+        case "song_played":
+          return {
+            ...prev,
+            songsPlayed: prev.songsPlayed + 1,
+          };
+
+        case "queue_update":
+          return {
+            ...prev,
+            queueLength: data.queueLength,
+          };
+
+        case "voice_update":
+          return {
+            ...prev,
+            activeListeners: data.activeListeners,
+          };
+
+        default:
+          return prev;
+      }
+    });
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+
+  return () => {
+    ws.close();
+  };
+}, [currentServerId]);
+
 
   /* ======================
      LOAD RECENT ACTIVITY

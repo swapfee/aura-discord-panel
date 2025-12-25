@@ -229,13 +229,13 @@ app.get("/api/servers", async (req, res) => {
     }),
   ]);
 
-  const userGuilds = Array.isArray(await userGuildsRes.json())
-    ? await userGuildsRes.json()
-    : [];
+  const userGuilds = await userGuildsRes.json();
+  const botGuilds = await botGuildsRes.json();
 
-  const botGuilds = Array.isArray(await botGuildsRes.json())
-    ? await botGuildsRes.json()
-    : [];
+  if (!Array.isArray(userGuilds) || !Array.isArray(botGuilds)) {
+    console.error("Discord API error", { userGuilds, botGuilds });
+    return res.json({ servers: [] });
+  }
 
   const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
@@ -243,30 +243,28 @@ app.get("/api/servers", async (req, res) => {
 
   for (const g of userGuilds) {
     let memberCount = null;
-    let permissionsOk = false;
 
     if (botGuildIds.has(g.id)) {
       try {
-        const [guildRes, memberRes] = await Promise.all([
-          fetch(`https://discord.com/api/guilds/${g.id}?with_counts=true`, {
-            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
-          }),
-          fetch(`https://discord.com/api/guilds/${g.id}/members/@me`, {
-            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
-          }),
-        ]);
+        const guildRes = await fetch(
+          `https://discord.com/api/guilds/${g.id}?with_counts=true`,
+          {
+            headers: {
+              Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+            },
+          }
+        );
+
+        const guildData = await guildRes.json(); // ✅ READ ONCE
 
         if (guildRes.ok) {
-          const guildData = await guildRes.json();
-          memberCount = guildData.approximate_member_count ?? null;
+          memberCount =
+            guildData.approximate_member_count ??
+            guildData.member_count ??
+            null;
         }
-
-        if (memberRes.ok) {
-          const member = await memberRes.json();
-          permissionsOk = hasAdminPermission(member.permissions);
-        }
-      } catch {
-        permissionsOk = false;
+      } catch (err) {
+        console.error("Guild fetch failed", g.id, err);
       }
     }
 
@@ -277,12 +275,13 @@ app.get("/api/servers", async (req, res) => {
       server_icon: g.icon,
       member_count: memberCount,
       bot_connected: botGuildIds.has(g.id),
-      permissions_ok: permissionsOk,
+      can_invite_bot: (g.permissions & 0x20) === 0x20, // MANAGE_GUILD
     });
   }
 
   res.json({ servers });
 });
+
 
 
 app.post("/api/servers/sync", async (req, res) => {

@@ -107,18 +107,6 @@ function timeAgo(date) {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-const wss = new WebSocketServer({ server });
-
-function broadcastToGuild(guildId, payload) {
-  for (const client of wss.clients) {
-    if (client.readyState === 1 && client.guildId === guildId) {
-      client.send(JSON.stringify(payload));
-    }
-  }
-}
-
-
-
 async function requireUser(req) {
   const token = req.cookies.session;
   if (!token) return null;
@@ -404,6 +392,15 @@ const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
    WEBSOCKETS — LIVE STATS
 ====================== */
 
+const wss = new WebSocketServer({ server });
+
+function broadcastToGuild(guildId, payload) {
+  for (const client of wss.clients) {
+    if (client.readyState === 1 && client.guildId === guildId) {
+      client.send(JSON.stringify(payload));
+    }
+  }
+}
 
 wss.on("connection", async (ws, req) => {
   try {
@@ -480,4 +477,3 @@ app.post("/api/internal/voice-update", (req, res) => {
 
   res.json({ ok: true });
 });
-

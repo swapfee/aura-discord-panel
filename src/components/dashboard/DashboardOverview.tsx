@@ -10,7 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useBot } from "@/contexts/BotContext";
-c
+
 
 /* ======================
    TYPES

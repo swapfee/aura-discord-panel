@@ -6,6 +6,8 @@ import passport from "passport";
 import { Strategy as DiscordStrategy } from "passport-discord-auth";
 import { SignJWT, jwtVerify } from "jose";
 import mongoose from "mongoose";
+import { WebSocketServer } from "ws";
+
 
 import { encrypt, decrypt } from "./src/lib/crypto.js";
 import { DiscordToken } from "./src/models/DiscordToken.js";

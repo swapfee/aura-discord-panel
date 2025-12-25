@@ -64,6 +64,12 @@ await mongoose.connect(MONGO_URL);
 // 🤖 Bot DB (analytics)
 const botDb = mongoose.createConnection(BOT_MONGO_URL);
 
+await new Promise((resolve, reject) => {
+  botDb.once("open", resolve);
+  botDb.once("error", reject);
+});
+
+
 // Register bot models on BOT DB ONLY
 const SongPlay = registerSongPlay(botDb);
 const VoiceSession = registerVoiceSession(botDb);
@@ -101,16 +107,16 @@ function timeAgo(date) {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
+const wss = new WebSocketServer({ server });
+
 function broadcastToGuild(guildId, payload) {
   for (const client of wss.clients) {
-    if (
-      client.readyState === 1 &&
-      client.guildId === guildId
-    ) {
+    if (client.readyState === 1 && client.guildId === guildId) {
       client.send(JSON.stringify(payload));
     }
   }
 }
+
 
 
 async function requireUser(req) {
@@ -352,6 +358,8 @@ app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
 });
 
 app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
   const sessions = await VoiceSession.find({ guildId: req.params.serverId }).lean();
 
   const totals = new Map();
@@ -396,16 +404,17 @@ const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
    WEBSOCKETS — LIVE STATS
 ====================== */
 
-const wss = new WebSocketServer({ server });
 
 wss.on("connection", async (ws, req) => {
   try {
     // Extract session cookie
     const cookies = req.headers.cookie ?? "";
     const session = cookies
-      .split(";")
-      .find(c => c.trim().startsWith("session="))
-      ?.split("=")[1];
+  .split(";")
+  .map(c => c.trim())
+  .find(c => c.startsWith("session="))
+  ?.slice("session=".length);
+
 
     if (!session) {
       ws.close();

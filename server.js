@@ -127,6 +127,9 @@ async function refreshDiscordToken(refreshToken) {
   };
 }
 
+/* ======================
+   PASSPORT
+====================== */
 passport.use(
   new DiscordStrategy(
     {
@@ -183,6 +186,9 @@ app.get(
   }
 );
 
+/* ======================
+   API
+====================== */
 app.get("/api/me", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).json({ user: null });
@@ -215,16 +221,40 @@ app.get("/api/servers", async (req, res) => {
   const botGuilds = await botGuildsRes.json();
   const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
-  const servers = Array.isArray(userGuilds)
-    ? userGuilds.map((g) => ({
-        id: g.id,
-        discord_server_id: g.id,
-        server_name: g.name,
-        server_icon: g.icon,
-        member_count: null,
-        bot_connected: botGuildIds.has(g.id),
-      }))
-    : [];
+  const servers = [];
+
+  for (const g of userGuilds) {
+    let memberCount = null;
+
+    if (botGuildIds.has(g.id)) {
+      try {
+        const guildRes = await fetch(
+          `https://discord.com/api/guilds/${g.id}?with_counts=true`,
+          {
+            headers: {
+              Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+            },
+          }
+        );
+
+        if (guildRes.ok) {
+          const guildData = await guildRes.json();
+          memberCount = guildData.approximate_member_count ?? null;
+        }
+      } catch {
+        memberCount = null;
+      }
+    }
+
+    servers.push({
+      id: g.id,
+      discord_server_id: g.id,
+      server_name: g.name,
+      server_icon: g.icon,
+      member_count: memberCount,
+      bot_connected: botGuildIds.has(g.id),
+    });
+  }
 
   res.json({ servers });
 });
@@ -234,6 +264,9 @@ app.post("/auth/logout", (_req, res) => {
   res.status(204).end();
 });
 
+/* ======================
+   FRONTEND
+====================== */
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));

@@ -19,6 +19,8 @@ interface ServerSelectorProps {
   onServerChange: (serverId: string) => void;
 }
 
+const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
+
 export default function ServerSelector({
   servers,
   loading = false,
@@ -28,7 +30,6 @@ export default function ServerSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [selected, setSelected] = useState<Server | null>(null);
 
-  // Auto-select first server
   useEffect(() => {
     if (!selected && servers.length > 0) {
       setSelected(servers[0]);
@@ -47,9 +48,13 @@ export default function ServerSelector({
       ? `https://cdn.discordapp.com/icons/${s.discord_server_id}/${s.server_icon}.png?size=64`
       : null;
 
-  /* ======================
-     COLLAPSED MODE
-  ====================== */
+  const inviteBot = (serverId: string) => {
+    if (!DISCORD_CLIENT_ID) return;
+
+    const url = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&permissions=8&scope=bot%20applications.commands&guild_id=${serverId}&disable_guild_select=true`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   if (collapsed) {
     return (
       <Button
@@ -77,9 +82,6 @@ export default function ServerSelector({
     );
   }
 
-  /* ======================
-     FULL MODE
-  ====================== */
   return (
     <div className="relative">
       <Button
@@ -192,7 +194,6 @@ export default function ServerSelector({
                     </div>
                   </button>
 
-                  {/* ✅ FIXED Add Bot Button */}
                   {server.bot_connected === false && (
                     <Button
                       variant="hero"
@@ -200,7 +201,7 @@ export default function ServerSelector({
                       className="w-full mt-2"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // TODO: bot invite flow
+                        inviteBot(server.discord_server_id);
                       }}
                     >
                       <Plus className="w-4 h-4" />

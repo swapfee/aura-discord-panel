@@ -30,8 +30,10 @@ type RecentTrack = {
 
 type TopListener = {
   userId: string;
+  username?: string | null;
   listenTimeMinutes: number;
   rank: number;
+
 };
 
 /* ======================
@@ -310,9 +312,10 @@ export default function DashboardOverview() {
                 </div>
 
                 <div className="flex-1">
-                  <p className="text-sm font-medium">
-                    User {l.userId.slice(0, 6)}
-                  </p>
+<p className="text-sm font-medium">
+  {l.username ?? `User ${l.userId.slice(0, 6)}`}
+</p>
+
                   <p className="text-xs text-muted-foreground">
                     {Math.floor(l.listenTimeMinutes / 60)}h{" "}
                     {l.listenTimeMinutes % 60}m

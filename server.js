@@ -117,6 +117,16 @@ async function requireUser(req) {
     return null;
   }
 }
+function requireInternalKey(req, res, next) {
+  const key = req.headers["x-internal-key"];
+
+  if (!key || key !== process.env.INTERNAL_API_KEY) {
+    return res.status(401).json({ error: "Unauthorized internal request" });
+  }
+
+  next();
+}
+
 
 /* ======================
    DISCORD TOKEN STORAGE
@@ -143,6 +153,7 @@ async function saveDiscordTokens({
     { upsert: true }
   );
 }
+
 
 async function getDiscordTokens(userId) {
   const doc = await DiscordToken.findOne({ userId }).lean();
@@ -506,7 +517,7 @@ wss.on("connection", async (ws, req) => {
    INTERNAL BOT EVENTS
 ====================== */
 
-app.post("/api/internal/song-played", (req, res) => {
+app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
   const { guildId, title, artist } = req.body;
 
   broadcastToGuild(guildId, {
@@ -518,7 +529,7 @@ app.post("/api/internal/song-played", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/internal/queue-update", (req, res) => {
+app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
   const { guildId, queueLength } = req.body;
 
   broadcastToGuild(guildId, {
@@ -529,7 +540,7 @@ app.post("/api/internal/queue-update", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/internal/voice-update", (req, res) => {
+app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   const { guildId, activeListeners } = req.body;
 
   broadcastToGuild(guildId, {

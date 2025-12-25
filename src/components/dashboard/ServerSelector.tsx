@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Check, Plus, Users, Loader2 } from "lucide-react";
+import { ChevronDown, Plus, Check, Users, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -12,12 +12,12 @@ export type Server = {
   bot_connected?: boolean | null;
 };
 
-type ServerSelectorProps = {
+interface ServerSelectorProps {
   servers: Server[];
   loading?: boolean;
   collapsed?: boolean;
   onServerChange: (serverId: string) => void;
-};
+}
 
 export default function ServerSelector({
   servers,
@@ -28,7 +28,7 @@ export default function ServerSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [selected, setSelected] = useState<Server | null>(null);
 
-  // Auto-select first server when servers load
+  // Auto-select first server
   useEffect(() => {
     if (!selected && servers.length > 0) {
       setSelected(servers[0]);
@@ -104,6 +104,7 @@ export default function ServerSelector({
                   </span>
                 )}
               </div>
+
               <div className="text-left min-w-0">
                 <p className="text-sm font-medium truncate max-w-[140px]">
                   {selected.server_name}
@@ -137,72 +138,76 @@ export default function ServerSelector({
               const selectedRow = selected?.id === server.id;
 
               return (
-                <button
+                <div
                   key={server.id}
-                  onClick={() => handleSelect(server)}
                   className={cn(
-                    "w-full flex items-center gap-3 p-2 rounded-lg transition-colors text-left",
+                    "w-full p-2 rounded-lg transition-colors",
                     selectedRow
                       ? "bg-primary/10 border border-primary/20"
                       : "hover:bg-secondary"
                   )}
                 >
-                  <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0">
-                    {iconUrl(server) ? (
-                      <img
-                        src={iconUrl(server)!}
-                        alt={server.server_name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-sm font-bold">
-                        {server.server_name[0]}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium truncate">
-                        {server.server_name}
-                      </p>
-                      {selectedRow && (
-                        <Check className="w-4 h-4 text-primary shrink-0" />
+                  <button
+                    onClick={() => handleSelect(server)}
+                    className="w-full flex items-center gap-3 text-left"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0">
+                      {iconUrl(server) ? (
+                        <img
+                          src={iconUrl(server)!}
+                          alt={server.server_name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-bold">
+                          {server.server_name[0]}
+                        </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Users className="w-3 h-3" />
-                      <span>
-                        {typeof server.member_count === "number"
-                          ? server.member_count.toLocaleString()
-                          : "—"}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate">
+                          {server.server_name}
+                        </p>
+                        {selectedRow && (
+                          <Check className="w-4 h-4 text-primary shrink-0" />
+                        )}
+                      </div>
 
-                      {server.bot_connected === true && (
-                        <span className="text-success">• Connected</span>
-                      )}
-                      {server.bot_connected === false && (
-                        <span className="text-warning">• Not connected</span>
-                      )}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Users className="w-3 h-3" />
+                        <span>
+                          {typeof server.member_count === "number"
+                            ? server.member_count.toLocaleString()
+                            : "—"}
+                        </span>
+                        {server.bot_connected === true && (
+                          <span className="text-success">• Connected</span>
+                        )}
+                        {server.bot_connected === false && (
+                          <span className="text-warning">• Not connected</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  </button>
 
+                  {/* ✅ FIXED Add Bot Button */}
                   {server.bot_connected === false && (
                     <Button
                       variant="hero"
                       size="sm"
-                      className="shrink-0"
+                      className="w-full mt-2"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // future: bot invite flow
+                        // TODO: bot invite flow
                       }}
                     >
                       <Plus className="w-4 h-4" />
                       Add Bot
                     </Button>
                   )}
-                </button>
+                </div>
               );
             })}
 

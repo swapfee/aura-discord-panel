@@ -5,13 +5,15 @@ import {
   Clock,
   Music,
   Users,
-  TrendingUp,
   Headphones,
   BarChart3,
   Loader2,
 } from "lucide-react";
 import { useBot } from "@/contexts/BotContext";
 
+/* ======================
+   TYPES
+====================== */
 type OverviewStats = {
   songsPlayed: number;
   listeningTimeMinutes: number;
@@ -19,24 +21,81 @@ type OverviewStats = {
   queueLength: number;
 };
 
+type RecentTrack = {
+  title: string;
+  artist: string;
+  cover?: string | null;
+  playedAt: string;
+};
+
+type TopListener = {
+  userId: string;
+  listenTimeMinutes: number;
+  rank: number;
+};
+
+/* ======================
+   COMPONENT
+====================== */
 export default function DashboardOverview() {
   const { currentServerId } = useBot();
 
   const [stats, setStats] = useState<OverviewStats | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [recentTracks, setRecentTracks] = useState<RecentTrack[]>([]);
+  const [topListeners, setTopListeners] = useState<TopListener[]>([]);
 
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [listenersLoading, setListenersLoading] = useState(false);
+
+  /* ======================
+     LOAD OVERVIEW STATS
+  ====================== */
   useEffect(() => {
     if (!currentServerId) return;
 
-    setLoading(true);
+    setStatsLoading(true);
     fetch(`/api/servers/${currentServerId}/overview`, {
       credentials: "include",
     })
       .then((res) => res.json())
       .then((data) => setStats(data))
-      .finally(() => setLoading(false));
+      .finally(() => setStatsLoading(false));
   }, [currentServerId]);
 
+  /* ======================
+     LOAD RECENT ACTIVITY
+  ====================== */
+  useEffect(() => {
+    if (!currentServerId) return;
+
+    setActivityLoading(true);
+    fetch(`/api/servers/${currentServerId}/recent-activity`, {
+      credentials: "include",
+    })
+      .then((res) => res.json())
+      .then((data) => setRecentTracks(data.tracks ?? []))
+      .finally(() => setActivityLoading(false));
+  }, [currentServerId]);
+
+  /* ======================
+     LOAD TOP LISTENERS
+  ====================== */
+  useEffect(() => {
+    if (!currentServerId) return;
+
+    setListenersLoading(true);
+    fetch(`/api/servers/${currentServerId}/top-listeners`, {
+      credentials: "include",
+    })
+      .then((res) => res.json())
+      .then((data) => setTopListeners(data.listeners ?? []))
+      .finally(() => setListenersLoading(false));
+  }, [currentServerId]);
+
+  /* ======================
+     EMPTY / LOADING STATES
+  ====================== */
   if (!currentServerId) {
     return (
       <div className="text-muted-foreground">
@@ -45,9 +104,9 @@ export default function DashboardOverview() {
     );
   }
 
-  if (loading || !stats) {
+  if (statsLoading || !stats) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex items-center justify-center py-16">
         <Loader2 className="w-6 h-6 animate-spin" />
       </div>
     );
@@ -78,8 +137,12 @@ export default function DashboardOverview() {
     },
   ];
 
+  /* ======================
+     RENDER
+  ====================== */
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold mb-2">Dashboard</h1>
         <p className="text-muted-foreground">
@@ -106,7 +169,112 @@ export default function DashboardOverview() {
         ))}
       </div>
 
-      {/* You will plug Recent Activity + Top Listeners here next */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Recent Activity */}
+        <Card variant="glass" className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Headphones className="w-5 h-5 text-primary" />
+              Recent Activity
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {activityLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            )}
+
+            {!activityLoading && recentTracks.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No tracks played yet
+              </div>
+            )}
+
+            {recentTracks.map((track, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+              >
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-secondary">
+                  {track.cover ? (
+                    <img
+                      src={track.cover}
+                      alt={track.title}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Play className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {track.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {track.artist}
+                  </p>
+                </div>
+
+                <span className="text-xs text-muted-foreground">
+                  {track.playedAt}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Top Listeners */}
+        <Card variant="glass">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary" />
+              Top Listeners
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {listenersLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            )}
+
+            {!listenersLoading && topListeners.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No listener data yet
+              </div>
+            )}
+
+            {topListeners.map((l) => (
+              <div
+                key={l.userId}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary">
+                    #{l.rank}
+                  </span>
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-sm font-medium">
+                    User {l.userId.slice(0, 6)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.floor(l.listenTimeMinutes / 60)}h{" "}
+                    {l.listenTimeMinutes % 60}m today
+                  </p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

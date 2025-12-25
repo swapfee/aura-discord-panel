@@ -32,14 +32,20 @@ export default function ServerSelector({
   const [selected, setSelected] = useState<Server | null>(null);
 
   /* ======================
-     AUTO SELECT FIRST
+     AUTO SELECT FIRST THAT MAKES SENSE 
   ====================== */
-  useEffect(() => {
-    if (!selected && servers.length > 0) {
-      setSelected(servers[0]);
-      onServerChange(servers[0].discord_server_id);
-    }
-  }, [servers, selected, onServerChange]);
+useEffect(() => {
+  if (selected || servers.length === 0) return;
+
+  // 1️⃣ Prefer a server where the bot is already connected
+  const botServer = servers.find((s) => s.bot_connected === true);
+
+  const serverToSelect = botServer ?? servers[0];
+
+  setSelected(serverToSelect);
+  onServerChange(serverToSelect.discord_server_id);
+}, [servers, selected, onServerChange]);
+
 
   const handleSelect = (server: Server) => {
     setSelected(server);

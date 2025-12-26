@@ -528,28 +528,9 @@ app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
 
   res.json({ ok: true });
 });
-app.post("/api/internal/queue-update", requireInternalKey, async (req, res) => {
+app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
   const { guildId, queueLength } = req.body;
 
-  if (!guildId || typeof queueLength !== "number") {
-    return res.status(400).json({ error: "Invalid payload" });
-  }
-
-  // 🔥 Persist queue length snapshot
-  await Queue.findOneAndUpdate(
-    { guildId },
-    {
-      $set: {
-        tracks: Array.from({ length: queueLength }, (_, i) => ({
-          position: i,
-        })),
-        updatedAt: new Date(),
-      },
-    },
-    { upsert: true }
-  );
-
-  // 🔁 Broadcast live update
   broadcastToGuild(guildId, {
     type: "queue_update",
     queueLength,
@@ -557,6 +538,7 @@ app.post("/api/internal/queue-update", requireInternalKey, async (req, res) => {
 
   res.json({ ok: true });
 });
+
 
 app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   const { guildId, activeListeners } = req.body;

@@ -12,7 +12,6 @@ import { WebSocketServer } from "ws";
 import { encrypt, decrypt } from "./src/lib/crypto.js";
 import { DiscordToken } from "./src/models/DiscordToken.js";
 
-// 🤖 BOT MODELS (READ-ONLY)
 import { registerSongPlay } from "./src/bot-models/SongPlay.js";
 import { registerVoiceSession } from "./src/bot-models/VoiceSession.js";
 import { registerQueue } from "./src/bot-models/Queue.js";

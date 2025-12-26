@@ -457,6 +457,42 @@ app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   broadcastToGuild(guildId, { type: "voice_update", activeListeners });
   res.json({ ok: true });
 });
+app.get("/api/servers/:serverId/queue", async (req, res) => {
+  const user = await requireUser(req);
+  if (!user) return res.status(401).end();
+
+  const { serverId } = req.params;
+  try {
+    const queue = await Queue.findOne({ guildId: serverId }).lean();
+
+    if (!queue) {
+      return res.json({ nowPlaying: null, tracks: [], queueLength: 0 });
+    }
+
+    // Return minimal data the UI needs
+    return res.json({
+      nowPlaying: queue.nowPlaying ?? null,
+      tracks: (queue.tracks ?? []).map((t) => ({
+        title: t.title,
+        artist: t.artist,
+        url: t.url,
+        durationMs: t.durationMs,
+        cover: t.coverUrl ?? null,
+        requestedBy: t.requestedBy ?? null,
+        position: t.position ?? null,
+      })),
+      queueLength:
+        typeof queue.queueLength === "number"
+          ? queue.queueLength
+          : queue.tracks?.length ?? 0,
+    });
+  } catch (err) {
+    console.error("[QUEUE ROUTE ERROR]", err);
+    return res
+      .status(500)
+      .json({ nowPlaying: null, tracks: [], queueLength: 0 });
+  }
+});
 
 // final express error handler
 app.use((err, req, res, next) => {

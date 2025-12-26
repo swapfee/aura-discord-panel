@@ -528,7 +528,7 @@ app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
 
   res.json({ ok: true });
 });
-app.post("/api/internal/queue-update", requireInternal, async (req, res) => {
+app.post("/api/internal/queue-update", requireInternalKey, async (req, res) => {
   const { guildId, queueLength } = req.body;
 
   if (!guildId || typeof queueLength !== "number") {

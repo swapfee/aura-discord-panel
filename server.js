@@ -368,7 +368,7 @@ app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
 
   const plays = await SongPlay.find({ guildId: req.params.serverId })
     .sort({ playedAt: -1 })
-    .limit(10)
+    .limit(7)
     .lean();
 
   res.json({

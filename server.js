@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -7,8 +8,6 @@ import { Strategy as DiscordStrategy } from "passport-discord-auth";
 import { SignJWT, jwtVerify } from "jose";
 import mongoose from "mongoose";
 import { WebSocketServer } from "ws";
-
-
 import { encrypt, decrypt } from "./src/lib/crypto.js";
 import { DiscordToken } from "./src/models/DiscordToken.js";
 
@@ -22,12 +21,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.set("trust proxy", 1);
 
-app.use(express.json());
+// JSON limit (tune if needed)
+app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
-/* ======================
-   ENV
-====================== */
+/* log aborted requests minimally */
+app.use((req, res, next) => {
+  req.on("aborted", () => {
+    console.warn("[HTTP] request aborted by client:", {
+      method: req.method,
+      url: req.originalUrl,
+      ip: req.ip || req.socket.remoteAddress,
+      ua: req.headers["user-agent"],
+    });
+  });
+  next();
+});
 
 const {
   DISCORD_CLIENT_ID,
@@ -53,47 +62,31 @@ if (
   process.exit(1);
 }
 
-/* ======================
-   DATABASES
-====================== */
-
-// 🌐 Website DB (auth, tokens)
+// Connect DBs
 await mongoose.connect(MONGO_URL);
-
-// 🤖 Bot DB (analytics)
 const botDb = mongoose.createConnection(BOT_MONGO_URL);
-
 await new Promise((resolve, reject) => {
   botDb.once("open", resolve);
   botDb.once("error", reject);
 });
 
-
-// Register bot models on BOT DB ONLY
 const SongPlay = registerSongPlay(botDb);
 const VoiceSession = registerVoiceSession(botDb);
 const Queue = registerQueue(botDb);
 
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 
-/* ======================
-   HELPERS
-====================== */
-
 function cookieOpts() {
-  return {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-  };
+  return { httpOnly: true, secure: true, sameSite: "lax", path: "/" };
 }
 
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
-
 function hasAdminPermissions(permissions) {
   try {
-    return (BigInt(permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+    return (
+      (BigInt(permissions) & ADMINISTRATOR_PERMISSION) ===
+      ADMINISTRATOR_PERMISSION
+    );
   } catch {
     return false;
   }
@@ -116,21 +109,15 @@ async function requireUser(req) {
     return null;
   }
 }
+
 function requireInternalKey(req, res, next) {
   const key = req.headers["x-internal-key"];
-
-  if (!key || key !== process.env.INTERNAL_API_KEY) {
+  if (!key || key !== process.env.INTERNAL_API_KEY)
     return res.status(401).json({ error: "Unauthorized internal request" });
-  }
-
   next();
 }
 
-
-/* ======================
-   DISCORD TOKEN STORAGE
-====================== */
-
+// Discord token helpers
 async function saveDiscordTokens({
   userId,
   accessToken,
@@ -153,11 +140,9 @@ async function saveDiscordTokens({
   );
 }
 
-
 async function getDiscordTokens(userId) {
   const doc = await DiscordToken.findOne({ userId }).lean();
   if (!doc) return null;
-
   return {
     accessToken: decrypt(doc.accessToken),
     refreshToken: decrypt(doc.refreshToken),
@@ -183,20 +168,14 @@ async function refreshDiscordToken(refreshToken) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-
   if (!r.ok) throw new Error("Failed to refresh token");
   const data = await r.json();
-
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? refreshToken,
     expiresAt: new Date(Date.now() + data.expires_in * 1000),
   };
 }
-
-/* ======================
-   PASSPORT
-====================== */
 
 passport.use(
   new DiscordStrategy(
@@ -218,13 +197,9 @@ passport.use(
     }
   )
 );
-
 app.use(passport.initialize());
 
-/* ======================
-   AUTH
-====================== */
-
+// Auth routes
 app.get("/auth/discord", passport.authenticate("discord"));
 
 app.get(
@@ -232,7 +207,6 @@ app.get(
   passport.authenticate("discord", { session: false, failureRedirect: "/" }),
   async (req, res) => {
     const u = req.user;
-
     await saveDiscordTokens({
       userId: u.id,
       accessToken: u.accessToken,
@@ -258,10 +232,7 @@ app.get(
   }
 );
 
-/* ======================
-   API
-====================== */
-
+// API routes (overview / recent / top listeners)
 app.get("/api/me", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).json({ user: null });
@@ -271,16 +242,13 @@ app.get("/api/me", async (req, res) => {
 app.get("/api/servers", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).json({ servers: [] });
-
   let tokens = await getDiscordTokens(user.sub);
   if (!tokens) return res.json({ servers: [] });
-
   if (isExpired(tokens.expiresAt)) {
     const refreshed = await refreshDiscordToken(tokens.refreshToken);
     await saveDiscordTokens({ userId: user.sub, ...refreshed });
     tokens = refreshed;
   }
-
   const [userGuildsRes, botGuildsRes] = await Promise.all([
     fetch("https://discord.com/api/users/@me/guilds", {
       headers: { Authorization: `Bearer ${tokens.accessToken}` },
@@ -289,13 +257,10 @@ app.get("/api/servers", async (req, res) => {
       headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
     }),
   ]);
-
   const userGuilds = await userGuildsRes.json();
   const botGuilds = await botGuildsRes.json();
-
-  const botGuildIds = new Set(botGuilds.map(g => g.id));
-
-  const servers = userGuilds.map(g => ({
+  const botGuildIds = new Set(botGuilds.map((g) => g.id));
+  const servers = userGuilds.map((g) => ({
     id: g.id,
     discord_server_id: g.id,
     server_name: g.name,
@@ -303,54 +268,50 @@ app.get("/api/servers", async (req, res) => {
     bot_connected: botGuildIds.has(g.id),
     can_invite_bot: hasAdminPermissions(g.permissions),
   }));
-
   res.json({ servers });
 });
 
-// server.js — optimized overview endpoint
 app.get("/api/servers/:serverId/overview", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
-
   const { serverId } = req.params;
   try {
-    // 1) songs played (ensure index on SongPlay.guildId)
     const songsPlayedPromise = SongPlay.countDocuments({ guildId: serverId });
-
-    // 2) listening time and active listeners (aggregation)
     const sessionsAgg = await VoiceSession.aggregate([
       { $match: { guildId: serverId, joinedAt: { $exists: true } } },
-      { $project: {
+      {
+        $project: {
           joinedAt: 1,
           leftAt: 1,
-          // duration in ms (if leftAt is null, use now)
-          durationMs: { $subtract: [ { $ifNull: ["$leftAt", "$$NOW"] }, "$joinedAt" ] }
-      }},
-      { $group: {
+          durationMs: {
+            $subtract: [{ $ifNull: ["$leftAt", "$$NOW"] }, "$joinedAt"],
+          },
+        },
+      },
+      {
+        $group: {
           _id: null,
           totalListeningMs: { $sum: { $max: ["$durationMs", 0] } },
-          // count sessions where leftAt is null -> active sessions
-          activeSessions: { $sum: { $cond: [ { $eq: ["$leftAt", null] }, 1, 0 ] } }
-      }}
+          activeSessions: {
+            $sum: { $cond: [{ $eq: ["$leftAt", null] }, 1, 0] },
+          },
+        },
+      },
     ]);
-
-    // 3) queue length with $size (no tracks payload)
     const queueAgg = await Queue.aggregate([
       { $match: { guildId: serverId } },
-      { $project: { queueLength: { $size: { $ifNull: ["$tracks", []] } } } }
+      { $project: { queueLength: { $size: { $ifNull: ["$tracks", []] } } } },
     ]);
-
     const songsPlayed = await songsPlayedPromise;
     const totalListeningMs = sessionsAgg[0]?.totalListeningMs ?? 0;
     const listeningTimeMinutes = Math.floor(totalListeningMs / 60000);
     const activeListeners = sessionsAgg[0]?.activeSessions ?? 0;
     const queueLength = queueAgg[0]?.queueLength ?? 0;
-
     return res.json({
       songsPlayed,
       listeningTimeMinutes,
       activeListeners,
-      queueLength
+      queueLength,
     });
   } catch (err) {
     console.error("[OVERVIEW ERROR]", err);
@@ -363,19 +324,15 @@ app.get("/api/servers/:serverId/overview", async (req, res) => {
   }
 });
 
-
-
 app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
-
   const plays = await SongPlay.find({ guildId: req.params.serverId })
     .sort({ playedAt: -1 })
     .limit(7)
     .lean();
-
   res.json({
-    tracks: plays.map(p => ({
+    tracks: plays.map((p) => ({
       title: p.title,
       artist: p.artist,
       cover: p.coverUrl ?? null,
@@ -387,169 +344,139 @@ app.get("/api/servers/:serverId/recent-activity", async (req, res) => {
 app.get("/api/servers/:serverId/top-listeners", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
-
   const sessions = await VoiceSession.find({
     guildId: req.params.serverId,
   }).lean();
-
   const totals = new Map();
-
   for (const s of sessions) {
     if (!s.userId || !s.joinedAt) continue;
-
     const end = s.leftAt ? new Date(s.leftAt) : new Date();
     const mins = Math.floor((end - new Date(s.joinedAt)) / 60000);
-
-    totals.set(
-      s.userId,
-      (totals.get(s.userId) ?? 0) + Math.max(0, mins)
-    );
+    totals.set(s.userId, (totals.get(s.userId) ?? 0) + Math.max(0, mins));
   }
-
-  const topRaw = [...totals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  // 🔥 Fetch usernames from Discord
+  const topRaw = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   const listeners = await Promise.all(
     topRaw.map(async ([userId, minutes], index) => {
       let username = null;
-
       try {
-        const r = await fetch(
-          `https://discord.com/api/users/${userId}`,
-          {
-            headers: {
-              Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
-            },
-          }
-        );
-
+        const r = await fetch(`https://discord.com/api/users/${userId}`, {
+          headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+        });
         if (r.ok) {
           const u = await r.json();
           username = u.username;
         }
       } catch {}
-
-      return {
-        userId,
-        username,
-        listenTimeMinutes: minutes,
-        rank: index + 1,
-      };
+      return { userId, username, listenTimeMinutes: minutes, rank: index + 1 };
     })
   );
-
   res.json({ listeners });
 });
-
-
 
 app.post("/auth/logout", (_req, res) => {
   res.clearCookie("session", cookieOpts());
   res.status(204).end();
 });
 
-/* ======================
-   FRONTEND (LAST)
-====================== */
-
+// serve frontend
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
-app.get("*", (_, res) =>
-  res.sendFile(path.join(distPath, "index.html"))
-);
+app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
 
 const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
   console.log("Server running")
 );
 
-/* ======================
-   WEBSOCKETS — LIVE STATS
-====================== */
+// handle malformed sockets/requests cleanly
+server.on("clientError", (err, socket) => {
+  try {
+    console.warn("[server] clientError:", err && err.message);
+    if (socket && socket.writable)
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    else socket.destroy();
+  } catch {
+    try {
+      socket.destroy();
+    } catch {}
+  }
+});
 
+// WebSocket server
 const wss = new WebSocketServer({ server });
 
 function broadcastToGuild(guildId, payload) {
   for (const client of wss.clients) {
-    if (client.readyState === 1 && client.guildId === guildId) {
+    if (client.readyState === 1 && client.guildId === guildId)
       client.send(JSON.stringify(payload));
-    }
   }
 }
 
 wss.on("connection", async (ws, req) => {
   try {
-    // Extract session cookie
     const cookies = req.headers.cookie ?? "";
     const session = cookies
-  .split(";")
-  .map(c => c.trim())
-  .find(c => c.startsWith("session="))
-  ?.slice("session=".length);
-
-
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("session="))
+      ?.slice("session=".length);
     if (!session) {
       ws.close();
       return;
     }
-
-    // Verify JWT
     const { payload } = await jwtVerify(session, JWT_KEY);
-
     ws.userId = payload.sub;
     ws.guildId = null;
-
     ws.send(JSON.stringify({ type: "connected" }));
   } catch {
     ws.close();
   }
-
-  ws.on("message", msg => {
+  ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg.toString());
-
-      if (data.type === "subscribe") {
-        ws.guildId = data.guildId;
-      }
+      if (data.type === "subscribe") ws.guildId = data.guildId;
     } catch {}
   });
 });
 
-/* ======================
-   INTERNAL BOT EVENTS
-====================== */
-
+/* internal bot events — broadcast-only */
 app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
   const { guildId, title, artist } = req.body;
-
-  broadcastToGuild(guildId, {
-    type: "song_played",
-    title,
-    artist,
-  });
-
+  broadcastToGuild(guildId, { type: "song_played", title, artist });
   res.json({ ok: true });
 });
+
 app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
   const { guildId, queueLength } = req.body;
-
-  broadcastToGuild(guildId, {
-    type: "queue_update",
-    queueLength,
-  });
-
+  // broadcast-only — DO NOT mutate DB here
+  broadcastToGuild(guildId, { type: "queue_update", queueLength });
   res.json({ ok: true });
 });
-
 
 app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   const { guildId, activeListeners } = req.body;
-
-  broadcastToGuild(guildId, {
-    type: "voice_update",
-    activeListeners,
-  });
-
+  broadcastToGuild(guildId, { type: "voice_update", activeListeners });
   res.json({ ok: true });
 });
+
+// final express error handler
+app.use((err, req, res, next) => {
+  console.error(
+    "[Express] error handler:",
+    err && (err.stack || err.message || err)
+  );
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: "Internal server error" });
+});
+
+// process handlers
+process.on("unhandledRejection", (reason) =>
+  console.error("[process] unhandledRejection:", reason)
+);
+process.on("uncaughtException", (err) =>
+  console.error(
+    "[process] uncaughtException:",
+    err && (err.stack || err.message || err)
+  )
+);
+
+export default app;

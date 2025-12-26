@@ -34,43 +34,31 @@ type QueuePageResponse = {
   totalPages: number;
 };
 
-/* ---------------------------
-   Constants for virtualization
-   --------------------------- */
-const ITEM_HEIGHT = 64; // px per row (approx)
-const VIRTUAL_BUFFER = 3; // render this many items above/below visible
+const ITEM_HEIGHT = 64;
+const VIRTUAL_BUFFER = 3;
 
-/* ---------------------------
-   Component
-   --------------------------- */
 const DashboardQueue: React.FC = () => {
   const { currentServerId } = useBot();
 
   const [tracks, setTracks] = useState<QueueApiTrack[]>([]);
   const [nowPlayingIndex, setNowPlayingIndex] = useState<number>(0);
   const [nowPlaying, setNowPlaying] = useState<QueueApiTrack | null>(null);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // pagination state
   const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(50);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [queueLength, setQueueLength] = useState<number>(0);
 
-  // virtualization refs
   const listRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(400);
 
   useEffect(() => {
-    // observe resize to set container height
     const el = listRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setContainerHeight(el.clientHeight);
-    });
+    const ro = new ResizeObserver(() => setContainerHeight(el.clientHeight));
     ro.observe(el);
     setContainerHeight(el.clientHeight);
     return () => ro.disconnect();
@@ -78,7 +66,6 @@ const DashboardQueue: React.FC = () => {
 
   const visibleCount = Math.ceil(containerHeight / ITEM_HEIGHT) || 5;
 
-  // helpers
   const durationToSeconds = (t?: QueueApiTrack) => {
     if (!t) return 0;
     if (typeof t.durationMs === "number")
@@ -99,7 +86,6 @@ const DashboardQueue: React.FC = () => {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // fetch current page from server
   const fetchQueuePage = useCallback(
     async (p: number, lim: number) => {
       if (!currentServerId) return;
@@ -114,22 +100,23 @@ const DashboardQueue: React.FC = () => {
         );
         if (!res.ok) throw new Error("Failed to fetch queue");
         const data = (await res.json()) as QueuePageResponse;
+
         setTracks(data.tracks ?? []);
         setNowPlaying(data.nowPlaying ?? null);
         setQueueLength(data.queueLength ?? 0);
         setTotalPages(Math.max(1, data.totalPages ?? 1));
-        // adjust nowPlayingIndex to within page bounds
         setNowPlayingIndex((prev) =>
           Math.min(prev, Math.max(0, (data.tracks?.length ?? 0) - 1))
         );
-        setError(null);
       } catch (err) {
         console.error("fetchQueuePage error", err);
-        setError("Failed to load queue page.");
+        // Per your request: show professional gray "Nothing in queue" on failure instead of red error.
         setTracks([]);
         setNowPlaying(null);
         setQueueLength(0);
         setTotalPages(1);
+        // we can keep a log-level error but present empty state to users
+        setError(null);
       } finally {
         setLoading(false);
       }
@@ -137,13 +124,11 @@ const DashboardQueue: React.FC = () => {
     [currentServerId]
   );
 
-  // initial load & when page/limit change
   useEffect(() => {
     if (!currentServerId) return;
     fetchQueuePage(page, limit);
   }, [currentServerId, page, limit, fetchQueuePage]);
 
-  // ws updates
   useGuildWebSocket(currentServerId, {
     onQueueUpdate: async (qlen: number) => {
       setQueueLength(qlen);
@@ -152,20 +137,14 @@ const DashboardQueue: React.FC = () => {
         setNowPlaying(null);
         return;
       }
-      // If queue length changed such that current page is now out-of-range, clamp or navigate
-      const globalIndexStart = (page - 1) * limit;
-      const globalIndexEnd = globalIndexStart + limit - 1;
-      // If the update likely affects current page (simple heuristic: if qlen changed or page changed), refetch
       await fetchQueuePage(page, limit);
     },
   });
 
-  // scroll handler for virtualization
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(e.currentTarget.scrollTop);
   };
 
-  // Calculate virtual window and spacers
   const pageItemCount = tracks.length;
   const startIndex = Math.max(
     0,
@@ -178,30 +157,46 @@ const DashboardQueue: React.FC = () => {
   const topPadding = startIndex * ITEM_HEIGHT;
   const bottomPadding = Math.max(0, (pageItemCount - endIndex) * ITEM_HEIGHT);
 
-  // pagination controls
   const goPrev = () => setPage((p) => Math.max(1, p - 1));
   const goNext = () => setPage((p) => Math.min(totalPages, p + 1));
-
   const changeLimit = (v: number) => {
     setLimit(v);
     setPage(1);
   };
 
-  // optimistic remove
   const removeFromQueue = (id?: string) => {
     setTracks((prev) => prev.filter((t) => (id ? t.id !== id : true)));
-    // optionally call backend endpoint to remove — TODO
+    // TODO: wire to backend remove endpoint
   };
 
   const clearQueue = () => {
     setTracks([]);
     setQueueLength(0);
-    // TODO: call backend clear
+    // TODO: wire to backend clear endpoint
   };
 
   const playAll = () => {
     if (tracks.length > 0) setNowPlayingIndex(0);
+    // TODO: optionally trigger bot to start playback
   };
+
+  // Empty/placeholder UI (professional gray)
+  const EmptyState: React.FC<{ title?: string; subtitle?: string }> = ({
+    title = "Nothing in queue",
+    subtitle = "Add songs to get started",
+  }) => (
+    <div className="flex items-center justify-center py-12 transition-opacity duration-200 ease-out">
+      <div className="flex flex-col items-center gap-2">
+        <div className="w-12 h-12 rounded-md bg-muted/20 flex items-center justify-center">
+          <ListMusic className="w-6 h-6 text-muted-foreground" />
+        </div>
+        <div className="text-lg font-medium text-muted-foreground">{title}</div>
+        <div className="text-sm text-muted-foreground opacity-80">
+          {subtitle}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -230,12 +225,10 @@ const DashboardQueue: React.FC = () => {
           </select>
 
           <Button variant="outline" size="sm" onClick={clearQueue}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Clear Queue
+            <Trash2 className="w-4 h-4 mr-2" /> Clear Queue
           </Button>
           <Button variant="hero" size="sm" onClick={playAll}>
-            <Play className="w-4 h-4 mr-2" />
-            Play All
+            <Play className="w-4 h-4 mr-2" /> Play All
           </Button>
         </div>
       </div>
@@ -261,21 +254,21 @@ const DashboardQueue: React.FC = () => {
                 <Clock className="w-3 h-3 inline mr-1" />
                 Duration
               </div>
-              <div className="col-span-2"></div>
+              <div className="col-span-2" />
             </div>
 
             {loading && <div className="p-4">Loading...</div>}
-            {!loading && error && (
-              <div className="p-4 text-destructive">{error}</div>
-            )}
-            {!loading && !error && queueLength === 0 && (
-              <div className="p-4 text-muted-foreground">
-                No songs in the queue.
-              </div>
+
+            {/* Always show the professional gray empty state when there are no tracks.
+                Per request: do not show a red error. */}
+            {!loading && (queueLength === 0 || tracks.length === 0) && (
+              <EmptyState
+                title="Nothing in queue"
+                subtitle="Add songs to get started"
+              />
             )}
 
-            {/* Virtualized list container */}
-            {!loading && !error && queueLength > 0 && (
+            {!loading && queueLength > 0 && tracks.length > 0 && (
               <div
                 ref={listRef}
                 onScroll={onScroll}
@@ -380,8 +373,8 @@ const DashboardQueue: React.FC = () => {
               </div>
             )}
 
-            {/* Pagination controls */}
-            {!loading && !error && queueLength > 0 && (
+            {/* Pagination */}
+            {!loading && queueLength > 0 && (
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2">
                   <Button

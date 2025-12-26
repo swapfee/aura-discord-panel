@@ -12,10 +12,8 @@ export function useGuildWebSocket(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
 
-  // ✅ Store latest handlers without re-running effect
+  // Keep latest handlers without re-running effect
   const handlersRef = useRef<GuildWebSocketHandlers>(handlers);
-
-  // Update ref on every render
   handlersRef.current = handlers;
 
   useEffect(() => {
@@ -57,13 +55,11 @@ export function useGuildWebSocket(
       }
     };
 
-    ws.onerror = () => {
-      ws.close();
-    };
+    ws.onerror = () => ws.close();
 
     return () => {
       ws.close();
       wsRef.current = null;
     };
-  }, [guildId]); // ✅ eslint happy, no reconnect loop
+  }, [guildId]);
 }

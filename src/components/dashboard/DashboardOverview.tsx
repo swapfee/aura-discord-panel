@@ -51,7 +51,7 @@ export default function DashboardOverview() {
   const [listenersLoading, setListenersLoading] = useState(false);
 
   /* ======================
-     REST: OVERVIEW STATS
+     LOAD OVERVIEW STATS (REST – REQUIRED)
   ====================== */
   useEffect(() => {
     if (!currentServerId) return;
@@ -68,7 +68,7 @@ export default function DashboardOverview() {
   }, [currentServerId]);
 
   /* ======================
-     WEBSOCKET: LIVE UPDATES
+     WEBSOCKET LIVE UPDATES (HOOK)
   ====================== */
   useGuildWebSocket(currentServerId, {
     onSongPlayed: () => {
@@ -76,22 +76,16 @@ export default function DashboardOverview() {
         prev ? { ...prev, songsPlayed: prev.songsPlayed + 1 } : prev
       );
     },
-
     onQueueUpdate: (queueLength) => {
-      setStats((prev) =>
-        prev ? { ...prev, queueLength } : prev
-      );
+      setStats((prev) => (prev ? { ...prev, queueLength } : prev));
     },
-
     onVoiceUpdate: (activeListeners) => {
-      setStats((prev) =>
-        prev ? { ...prev, activeListeners } : prev
-      );
+      setStats((prev) => (prev ? { ...prev, activeListeners } : prev));
     },
   });
 
   /* ======================
-     REST: RECENT ACTIVITY
+     LOAD RECENT ACTIVITY
   ====================== */
   useEffect(() => {
     if (!currentServerId) return;
@@ -106,7 +100,7 @@ export default function DashboardOverview() {
   }, [currentServerId]);
 
   /* ======================
-     REST: TOP LISTENERS
+     LOAD TOP LISTENERS
   ====================== */
   useEffect(() => {
     if (!currentServerId) return;
@@ -121,22 +115,30 @@ export default function DashboardOverview() {
   }, [currentServerId]);
 
   /* ======================
-     STATES
+     EMPTY / LOADING STATES
   ====================== */
   if (!currentServerId) {
-    return <div className="text-muted-foreground">Select a server.</div>;
+    return (
+      <div className="text-muted-foreground">
+        Select a server to view dashboard data.
+      </div>
+    );
   }
 
   if (statsLoading || !stats) {
     return (
-      <div className="flex justify-center py-16">
+      <div className="flex items-center justify-center py-16">
         <Loader2 className="w-6 h-6 animate-spin" />
       </div>
     );
   }
 
   const statCards = [
-    { label: "Songs Played", value: stats.songsPlayed, icon: Music },
+    {
+      label: "Songs Played",
+      value: stats.songsPlayed.toLocaleString(),
+      icon: Music,
+    },
     {
       label: "Listening Time",
       value: `${Math.floor(stats.listeningTimeMinutes / 60)}h ${
@@ -144,8 +146,16 @@ export default function DashboardOverview() {
       }m`,
       icon: Clock,
     },
-    { label: "Active Listeners", value: stats.activeListeners, icon: Users },
-    { label: "Queue Length", value: stats.queueLength, icon: BarChart3 },
+    {
+      label: "Active Listeners",
+      value: stats.activeListeners,
+      icon: Users,
+    },
+    {
+      label: "Queue Length",
+      value: stats.queueLength,
+      icon: BarChart3,
+    },
   ];
 
   /* ======================
@@ -153,54 +163,138 @@ export default function DashboardOverview() {
   ====================== */
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <h1 className="text-2xl font-bold mb-2">Dashboard</h1>
         <p className="text-muted-foreground">
           Here’s what’s happening in your server.
         </p>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="flex justify-between items-center">
+          <Card key={stat.label} variant="stat">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">{stat.label}</p>
                 <p className="text-2xl font-bold">{stat.value}</p>
               </div>
-              <stat.icon className="w-6 h-6 text-primary" />
-            </CardContent>
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <stat.icon className="w-6 h-6 text-primary" />
+              </div>
+            </div>
           </Card>
         ))}
       </div>
 
-      {/* Recent Activity */}
-      <Card className="lg:col-span-2">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Headphones className="w-5 h-5" />
-            Recent Activity
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {recentTracks.slice(0, 7).map((track, i) => (
-            <div key={i} className="flex gap-3 items-center">
-              <div className="w-12 h-12 bg-secondary rounded flex items-center justify-center">
-                <Play className="w-4 h-4" />
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Recent Activity */}
+        <Card variant="glass" className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Headphones className="w-5 h-5 text-primary" />
+              Recent Activity
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {activityLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
               </div>
-              <div className="flex-1 truncate">
-                <p className="font-medium truncate">{track.title}</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {track.artist}
-                </p>
+            )}
+
+            {!activityLoading && recentTracks.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No tracks played yet
               </div>
-              <span className="text-xs text-muted-foreground">
-                {track.playedAt}
-              </span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            )}
+
+            {(recentTracks.slice(0, 7) /* change 7 to 10 if you want */).map(
+              (track, index) => (
+                <div
+                  key={index}
+                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+                >
+                  <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-secondary">
+                    {track.cover ? (
+                      <img
+                        src={track.cover}
+                        alt={track.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Play className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{track.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {track.artist}
+                    </p>
+                  </div>
+
+                  <span className="text-xs text-muted-foreground">
+                    {track.playedAt}
+                  </span>
+                </div>
+              )
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top Listeners */}
+        <Card variant="glass">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary" />
+              Top Listeners
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {listenersLoading && (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin" />
+              </div>
+            )}
+
+            {!listenersLoading && topListeners.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No listener data yet
+              </div>
+            )}
+
+            {topListeners.map((l) => (
+              <div
+                key={l.userId}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary">
+                    #{l.rank}
+                  </span>
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-sm font-medium">
+                    {l.username ?? `User ${l.userId.slice(0, 6)}`}
+                  </p>
+
+                  <p className="text-xs text-muted-foreground">
+                    {Math.floor(l.listenTimeMinutes / 60)}h{" "}
+                    {l.listenTimeMinutes % 60}m
+                  </p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

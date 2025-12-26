@@ -308,47 +308,50 @@ app.get("/api/servers", async (req, res) => {
   res.json({ servers });
 });
 
+// server.js — optimized overview endpoint
 app.get("/api/servers/:serverId/overview", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
 
   const { serverId } = req.params;
-
   try {
-    const songsPlayed = await SongPlay.countDocuments({ guildId: serverId });
+    // 1) songs played (ensure index on SongPlay.guildId)
+    const songsPlayedPromise = SongPlay.countDocuments({ guildId: serverId });
 
-    const sessions = await VoiceSession.find({
-      guildId: serverId,
-      joinedAt: { $exists: true, $ne: null },
-    }).lean();
+    // 2) listening time and active listeners (aggregation)
+    const sessionsAgg = await VoiceSession.aggregate([
+      { $match: { guildId: serverId, joinedAt: { $exists: true } } },
+      { $project: {
+          joinedAt: 1,
+          leftAt: 1,
+          // duration in ms (if leftAt is null, use now)
+          durationMs: { $subtract: [ { $ifNull: ["$leftAt", "$$NOW"] }, "$joinedAt" ] }
+      }},
+      { $group: {
+          _id: null,
+          totalListeningMs: { $sum: { $max: ["$durationMs", 0] } },
+          // count sessions where leftAt is null -> active sessions
+          activeSessions: { $sum: { $cond: [ { $eq: ["$leftAt", null] }, 1, 0 ] } }
+      }}
+    ]);
 
-    let listeningTimeMinutes = 0;
+    // 3) queue length with $size (no tracks payload)
+    const queueAgg = await Queue.aggregate([
+      { $match: { guildId: serverId } },
+      { $project: { queueLength: { $size: { $ifNull: ["$tracks", []] } } } }
+    ]);
 
-    for (const s of sessions) {
-      const joined = new Date(s.joinedAt);
-      if (Number.isNaN(joined.getTime())) continue;
-
-      const end = s.leftAt ? new Date(s.leftAt) : new Date();
-      if (Number.isNaN(end.getTime())) continue;
-
-      listeningTimeMinutes += Math.max(
-        0,
-        Math.floor((end - joined) / 60000)
-      );
-    }
-
-    const activeListeners = await VoiceSession.countDocuments({
-      guildId: serverId,
-      $or: [{ leftAt: null }, { leftAt: { $exists: false } }],
-    });
-
-    const queue = await Queue.findOne({ guildId: serverId }).lean();
+    const songsPlayed = await songsPlayedPromise;
+    const totalListeningMs = sessionsAgg[0]?.totalListeningMs ?? 0;
+    const listeningTimeMinutes = Math.floor(totalListeningMs / 60000);
+    const activeListeners = sessionsAgg[0]?.activeSessions ?? 0;
+    const queueLength = queueAgg[0]?.queueLength ?? 0;
 
     return res.json({
       songsPlayed,
       listeningTimeMinutes,
       activeListeners,
-      queueLength: queue?.tracks?.length ?? 0,
+      queueLength
     });
   } catch (err) {
     console.error("[OVERVIEW ERROR]", err);
@@ -360,6 +363,7 @@ app.get("/api/servers/:serverId/overview", async (req, res) => {
     });
   }
 });
+
 
 
 app.get("/api/servers/:serverId/recent-activity", async (req, res) => {

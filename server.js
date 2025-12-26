@@ -462,35 +462,62 @@ app.get("/api/servers/:serverId/queue", async (req, res) => {
   if (!user) return res.status(401).end();
 
   const { serverId } = req.params;
-  try {
-    const queue = await Queue.findOne({ guildId: serverId }).lean();
+  // page and limit query params (1-based page)
+  const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+  const limit = Math.min(
+    200,
+    Math.max(10, parseInt(String(req.query.limit || "50"), 10))
+  ); // clamp 10..200
+  const skip = (page - 1) * limit;
 
-    if (!queue) {
-      return res.json({ nowPlaying: null, tracks: [], queueLength: 0 });
+  try {
+    // Project only the slice of tracks we need plus queueLength and nowPlaying
+    const proj = {
+      nowPlaying: 1,
+      queueLength: 1,
+      tracks: { $slice: [skip, limit] },
+    };
+
+    const queueDoc = await Queue.findOne({ guildId: serverId }, proj).lean();
+
+    if (!queueDoc) {
+      return res.json({
+        nowPlaying: null,
+        tracks: [],
+        queueLength: 0,
+        page,
+        limit,
+        totalPages: 0,
+      });
     }
 
-    // Return minimal data the UI needs
+    const qlen =
+      typeof queueDoc.queueLength === "number"
+        ? queueDoc.queueLength
+        : Array.isArray(queueDoc.tracks)
+        ? queueDoc.tracks.length
+        : 0;
+
+    const totalPages = Math.max(1, Math.ceil(qlen / limit));
+
     return res.json({
-      nowPlaying: queue.nowPlaying ?? null,
-      tracks: (queue.tracks ?? []).map((t) => ({
-        title: t.title,
-        artist: t.artist,
-        url: t.url,
-        durationMs: t.durationMs,
-        cover: t.coverUrl ?? null,
-        requestedBy: t.requestedBy ?? null,
-        position: t.position ?? null,
-      })),
-      queueLength:
-        typeof queue.queueLength === "number"
-          ? queue.queueLength
-          : queue.tracks?.length ?? 0,
+      nowPlaying: queueDoc.nowPlaying ?? null,
+      tracks: queueDoc.tracks ?? [],
+      queueLength: qlen,
+      page,
+      limit,
+      totalPages,
     });
   } catch (err) {
     console.error("[QUEUE ROUTE ERROR]", err);
-    return res
-      .status(500)
-      .json({ nowPlaying: null, tracks: [], queueLength: 0 });
+    return res.status(500).json({
+      nowPlaying: null,
+      tracks: [],
+      queueLength: 0,
+      page,
+      limit,
+      totalPages: 0,
+    });
   }
 });
 

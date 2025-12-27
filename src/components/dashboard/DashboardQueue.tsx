@@ -1,3 +1,4 @@
+// src/components/DashboardQueue.tsx
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import {
   Clock,
   User,
   ListMusic,
+  ChevronDown,
 } from "lucide-react";
 import { useBot } from "@/contexts/BotContext";
 import { useGuildWebSocket } from "@/hooks/useGuildWebSocket";
@@ -36,6 +38,43 @@ type QueuePageResponse = {
 
 const ITEM_HEIGHT = 64;
 const VIRTUAL_BUFFER = 3;
+
+/* Small, styled page-size selector (matches dashboard server-selector look) */
+const PageSizeSelector: React.FC<{
+  value: number;
+  onChange: (v: number) => void;
+  options?: number[];
+}> = ({ value, onChange, options = [20, 50, 100, 200] }) => {
+  return (
+    <div className="relative inline-flex items-center">
+      <select
+        aria-label="Page size"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="
+          bg-transparent
+          border border-border
+          text-sm text-muted-foreground
+          px-3 py-1 rounded-md
+          focus:outline-none focus:ring-2 focus:ring-primary/30
+          appearance-none
+        "
+        style={{ paddingRight: 30 }}
+      >
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+
+      {/* Custom caret to replace native arrow (keeps layout consistent) */}
+      <div className="pointer-events-none absolute right-2">
+        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+      </div>
+    </div>
+  );
+};
 
 const DashboardQueue: React.FC = () => {
   const { currentServerId } = useBot();
@@ -110,12 +149,11 @@ const DashboardQueue: React.FC = () => {
         );
       } catch (err) {
         console.error("fetchQueuePage error", err);
-        // Per your request: show professional gray "Nothing in queue" on failure instead of red error.
+        // Show professional gray empty state on failure per request
         setTracks([]);
         setNowPlaying(null);
         setQueueLength(0);
         setTotalPages(1);
-        // we can keep a log-level error but present empty state to users
         setError(null);
       } finally {
         setLoading(false);
@@ -127,7 +165,8 @@ const DashboardQueue: React.FC = () => {
   useEffect(() => {
     if (!currentServerId) return;
     fetchQueuePage(page, limit);
-  }, [currentServerId, page, limit, fetchQueuePage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentServerId, page, limit]);
 
   useGuildWebSocket(currentServerId, {
     onQueueUpdate: async (qlen: number) => {
@@ -137,6 +176,7 @@ const DashboardQueue: React.FC = () => {
         setNowPlaying(null);
         return;
       }
+      // If the server reports queue updates, refresh the current page (safe)
       await fetchQueuePage(page, limit);
     },
   });
@@ -177,10 +217,9 @@ const DashboardQueue: React.FC = () => {
 
   const playAll = () => {
     if (tracks.length > 0) setNowPlayingIndex(0);
-    // TODO: optionally trigger bot to start playback
+    // TODO: optionally instruct bot to start playback
   };
 
-  // Empty/placeholder UI (professional gray)
   const EmptyState: React.FC<{ title?: string; subtitle?: string }> = ({
     title = "Nothing in queue",
     subtitle = "Add songs to get started",
@@ -208,21 +247,11 @@ const DashboardQueue: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground mr-2">
-            Page size
-          </label>
-          <select
-            value={limit}
-            onChange={(e) => changeLimit(Number(e.target.value))}
-            className="mr-4"
-          >
-            {[20, 50, 100, 200].map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-muted-foreground">Page size</label>
+            <PageSizeSelector value={limit} onChange={changeLimit} />
+          </div>
 
           <Button variant="outline" size="sm" onClick={clearQueue}>
             <Trash2 className="w-4 h-4 mr-2" /> Clear Queue
@@ -259,8 +288,7 @@ const DashboardQueue: React.FC = () => {
 
             {loading && <div className="p-4">Loading...</div>}
 
-            {/* Always show the professional gray empty state when there are no tracks.
-                Per request: do not show a red error. */}
+            {/* Professional gray empty state */}
             {!loading && (queueLength === 0 || tracks.length === 0) && (
               <EmptyState
                 title="Nothing in queue"
@@ -373,7 +401,6 @@ const DashboardQueue: React.FC = () => {
               </div>
             )}
 
-            {/* Pagination */}
             {!loading && queueLength > 0 && (
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2">

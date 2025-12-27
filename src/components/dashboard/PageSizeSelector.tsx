@@ -21,7 +21,6 @@ export default function PageSizeSelector({
   const [selected, setSelected] = useState<number>(value ?? options[0]);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Restore selection from localStorage or initialize
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -34,7 +33,7 @@ export default function PageSizeSelector({
         }
       }
     } catch {
-      // ignore localStorage errors
+      // ignore storage errors
     }
 
     if (typeof value === "number" && options.includes(value)) {
@@ -46,12 +45,11 @@ export default function PageSizeSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // keep controlled value in sync
   useEffect(() => {
     if (typeof value === "number" && value !== selected) setSelected(value);
   }, [value, selected]);
 
-  // close on outside click
+  // close if you click outside
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -74,37 +72,30 @@ export default function PageSizeSelector({
 
   return (
     <div className="relative inline-block" ref={rootRef}>
-      {/* Main button: only the badge + chevron (no duplicate number) */}
+      {/* Compact main button: only number + chevron, no bubble */}
       <button
-        className="flex items-center gap-3 h-11 px-3 rounded-md bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className="flex items-center gap-2 h-10 px-3 rounded-md bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary/25"
         onClick={() => setIsOpen((s) => !s)}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        aria-label={`Page size: ${selected}`}
+        aria-label={`Page size ${selected}`}
         type="button"
       >
-        <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center">
-          <span className="text-sm font-semibold text-foreground">
-            {selected}
-          </span>
-        </div>
-
-        <div className="ml-2">
-          <ChevronDown
-            className={`w-4 h-4 text-muted-foreground ${
-              isOpen ? "rotate-180" : ""
-            }`}
-          />
-        </div>
+        <div className="text-sm font-semibold text-foreground">{selected}</div>
+        <ChevronDown
+          className={`w-4 h-4 text-muted-foreground ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
       </button>
 
       {isOpen && (
         <div
           role="listbox"
           aria-label="Page size"
-          className="absolute mt-2 w-36 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in"
+          className="absolute mt-2 w-28 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden animate-scale-in"
         >
-          <div className="p-1">
+          <div className="divide-y divide-border">
             {options.map((opt) => {
               const isSel = opt === selected;
               return (
@@ -114,22 +105,16 @@ export default function PageSizeSelector({
                   role="option"
                   aria-selected={isSel}
                   onClick={() => handleSelect(opt)}
-                  className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-lg text-left ${
+                  className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-none ${
                     isSel
-                      ? "bg-primary/10 border border-primary/20"
-                      : "hover:bg-secondary"
+                      ? "bg-primary/6 text-foreground font-medium"
+                      : "hover:bg-secondary text-muted-foreground"
                   }`}
                 >
-                  {/* only a single badge (left) — no duplicate text */}
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-                      <span className="text-base font-semibold text-foreground">
-                        {opt}
-                      </span>
-                    </div>
-                  </div>
+                  {/* single number (no bubble) */}
+                  <span className="leading-none">{opt}</span>
 
-                  {/* checkmark on the right if selected */}
+                  {/* small check when selected */}
                   {isSel ? <Check className="w-4 h-4 text-primary" /> : null}
                 </button>
               );

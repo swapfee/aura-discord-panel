@@ -240,35 +240,82 @@ app.get("/api/me", async (req, res) => {
 });
 
 app.get("/api/servers", async (req, res) => {
-  const user = await requireUser(req);
-  if (!user) return res.status(401).json({ servers: [] });
-  let tokens = await getDiscordTokens(user.sub);
-  if (!tokens) return res.json({ servers: [] });
-  if (isExpired(tokens.expiresAt)) {
-    const refreshed = await refreshDiscordToken(tokens.refreshToken);
-    await saveDiscordTokens({ userId: user.sub, ...refreshed });
-    tokens = refreshed;
+  try {
+    const user = await requireUser(req);
+    if (!user) return res.status(401).json({ servers: [] });
+
+    let tokens = await getDiscordTokens(user.sub);
+    if (!tokens) return res.json({ servers: [] });
+
+    if (isExpired(tokens.expiresAt)) {
+      const refreshed = await refreshDiscordToken(tokens.refreshToken);
+      await saveDiscordTokens({ userId: user.sub, ...refreshed });
+      tokens = refreshed;
+    }
+
+    // issue both requests in parallel
+    const [userGuildsRes, botGuildsRes] = await Promise.all([
+      fetch("https://discord.com/api/users/@me/guilds", {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      }),
+      fetch("https://discord.com/api/users/@me/guilds", {
+        headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+      }),
+    ]);
+
+    // Helper to safely parse guild arrays from responses
+    const parseGuildsResponse = async (resp, label) => {
+      let json;
+      try {
+        json = await resp.json();
+      } catch (err) {
+        console.warn(`[servers] ${label} response is not JSON`, err);
+        return [];
+      }
+
+      // If API returned array directly, great
+      if (Array.isArray(json)) return json;
+
+      // Some services wrap results, try common shapes
+      if (json && Array.isArray(json.guilds)) return json.guilds;
+      if (json && Array.isArray(json.data)) return json.data;
+
+      // Discord often returns an error object { message, code }, log it
+      console.warn(`[servers] ${label} unexpected shape:`, json);
+      return [];
+    };
+
+    const userGuilds = await parseGuildsResponse(userGuildsRes, "userGuilds");
+    const botGuilds = await parseGuildsResponse(botGuildsRes, "botGuilds");
+
+    // Build set of bot guild ids safely
+    const botGuildIds = new Set();
+    if (Array.isArray(botGuilds)) {
+      for (const g of botGuilds) {
+        const id = (g && (g.id ?? g.guildId ?? g.discord_server_id)) || null;
+        if (id) botGuildIds.add(String(id));
+      }
+    }
+
+    const servers = Array.isArray(userGuilds)
+      ? userGuilds.map((g) => {
+          const id = String(g?.id ?? g?.guildId ?? g?.discord_server_id ?? "");
+          return {
+            id,
+            discord_server_id: id,
+            server_name: g?.name ?? g?.server_name ?? "Unknown",
+            server_icon: g?.icon ?? null,
+            bot_connected: botGuildIds.has(id),
+            can_invite_bot: hasAdminPermissions(g?.permissions),
+          };
+        })
+      : [];
+
+    return res.json({ servers });
+  } catch (err) {
+    console.error("[/api/servers] error:", err);
+    return res.status(500).json({ servers: [] });
   }
-  const [userGuildsRes, botGuildsRes] = await Promise.all([
-    fetch("https://discord.com/api/users/@me/guilds", {
-      headers: { Authorization: `Bearer ${tokens.accessToken}` },
-    }),
-    fetch("https://discord.com/api/users/@me/guilds", {
-      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
-    }),
-  ]);
-  const userGuilds = await userGuildsRes.json();
-  const botGuilds = await botGuildsRes.json();
-  const botGuildIds = new Set(botGuilds.map((g) => g.id));
-  const servers = userGuilds.map((g) => ({
-    id: g.id,
-    discord_server_id: g.id,
-    server_name: g.name,
-    server_icon: g.icon,
-    bot_connected: botGuildIds.has(g.id),
-    can_invite_bot: hasAdminPermissions(g.permissions),
-  }));
-  res.json({ servers });
 });
 
 app.get("/api/servers/:serverId/overview", async (req, res) => {

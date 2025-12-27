@@ -21,8 +21,8 @@ export default function PageSizeSelector({
   const [selected, setSelected] = useState<number>(value ?? options[0]);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  // Restore or initialize selected value
   useEffect(() => {
-    // load saved value, else prop or first option
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -36,6 +36,7 @@ export default function PageSizeSelector({
     } catch {
       // ignore storage errors
     }
+
     if (typeof value === "number" && options.includes(value)) {
       setSelected(value);
     } else {
@@ -45,11 +46,12 @@ export default function PageSizeSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // If parent controls the value, sync
   useEffect(() => {
     if (typeof value === "number" && value !== selected) setSelected(value);
   }, [value, selected]);
 
-  // close on outside click
+  // Close on outside click
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -79,14 +81,14 @@ export default function PageSizeSelector({
         aria-expanded={isOpen}
         type="button"
       >
-        {/* small rounded badge with number */}
+        {/* left rounded badge */}
         <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center">
           <span className="text-sm font-semibold text-foreground">
             {selected}
           </span>
         </div>
 
-        {/* single number (keeps the compact look) */}
+        {/* number text to the right, compact */}
         <div className="text-sm font-medium text-foreground">{selected}</div>
 
         <div className="ml-2">
@@ -120,14 +122,23 @@ export default function PageSizeSelector({
                       : "hover:bg-secondary"
                   }`}
                 >
-                  {/* single centered number */}
-                  <div className="flex-1 flex items-center">
-                    <div className="text-lg font-semibold text-foreground">
-                      {opt}
+                  {/* left: small rounded badge */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                      <span className="text-base font-semibold text-foreground">
+                        {opt}
+                      </span>
+                    </div>
+
+                    {/* center: the same number as text (compact) */}
+                    <div>
+                      <div className="text-sm font-medium text-foreground">
+                        {opt}
+                      </div>
                     </div>
                   </div>
 
-                  {/* checkmark on right when selected */}
+                  {/* right: checkmark if selected */}
                   {isSel ? <Check className="w-4 h-4 text-primary" /> : null}
                 </button>
               );

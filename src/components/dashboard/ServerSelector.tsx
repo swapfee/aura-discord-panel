@@ -18,16 +18,18 @@ interface ServerSelectorProps {
   loading?: boolean;
   collapsed?: boolean;
   onServerChange: (serverId: string) => void;
+  storageKey?: string; // optional override
 }
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
-const STORAGE_KEY = "aura:lastServerId";
+const DEFAULT_STORAGE_KEY = "aura:lastServerId";
 
 export default function ServerSelector({
   servers,
   loading = false,
   collapsed = false,
   onServerChange,
+  storageKey = DEFAULT_STORAGE_KEY,
 }: ServerSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [selected, setSelected] = useState<Server | null>(null);
@@ -38,37 +40,49 @@ export default function ServerSelector({
   useEffect(() => {
     if (servers.length === 0) return;
 
-    const savedId = localStorage.getItem(STORAGE_KEY);
+    const savedId = (() => {
+      try {
+        return localStorage.getItem(storageKey);
+      } catch {
+        // ignore localStorage read errors (private mode / disabled)
+        return null;
+      }
+    })();
 
     // 1️⃣ Restore saved server if it still exists
     if (savedId) {
-      const match = servers.find(
-        (s) => s.discord_server_id === savedId
-      );
+      const match = servers.find((s) => s.discord_server_id === savedId);
       if (match) {
         setSelected(match);
         onServerChange(match.discord_server_id);
         return;
       } else {
-        localStorage.removeItem(STORAGE_KEY);
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {
+          // ignore remove errors
+        }
       }
     }
 
     // 2️⃣ Prefer bot-connected server
     const botServer = servers.find((s) => s.bot_connected === true);
-
     const fallback = botServer ?? servers[0];
 
     setSelected(fallback);
     onServerChange(fallback.discord_server_id);
-  }, [servers, onServerChange]);
+  }, [servers, onServerChange, storageKey]);
 
   /* ======================
      HANDLE SELECT
   ====================== */
   const handleSelect = (server: Server) => {
     setSelected(server);
-    localStorage.setItem(STORAGE_KEY, server.discord_server_id);
+    try {
+      localStorage.setItem(storageKey, server.discord_server_id);
+    } catch {
+      // ignore storage errors (private mode / quota)
+    }
     onServerChange(server.discord_server_id);
     setIsOpen(false);
   };
@@ -129,9 +143,7 @@ export default function ServerSelector({
               className="w-8 h-8 rounded-lg"
             />
           ) : (
-            <span className="text-sm font-bold">
-              {selected.server_name[0]}
-            </span>
+            <span className="text-sm font-bold">{selected.server_name[0]}</span>
           )
         ) : null}
       </Button>
@@ -265,8 +277,7 @@ export default function ServerSelector({
                           inviteBot(server.discord_server_id);
                         }}
                       >
-                        <Plus className="w-4 h-4" />
-                        Add Bot
+                        <Plus className="w-4 h-4" /> Add Bot
                       </Button>
                     )}
                 </div>

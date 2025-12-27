@@ -50,7 +50,6 @@ const STORAGE_KEY_PAGE_SIZE = "aura:pageSize";
 export default function DashboardQueue(): JSX.Element {
   const { currentServerId } = useBot();
 
-  // initial page-size from localStorage (fallback to 50)
   const initialLimit = useMemo(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_PAGE_SIZE);
@@ -59,7 +58,7 @@ export default function DashboardQueue(): JSX.Element {
         if (!Number.isNaN(n) && PAGE_OPTIONS.includes(n)) return n;
       }
     } catch {
-      /* ignore storage errors */
+      /* empty */
     }
     return 50;
   }, []);
@@ -69,13 +68,11 @@ export default function DashboardQueue(): JSX.Element {
   const [nowPlaying, setNowPlaying] = useState<QueueApiTrack | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  // pagination
   const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(initialLimit);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [queueLength, setQueueLength] = useState<number>(0);
 
-  // virtualization
   const listRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(400);
@@ -111,7 +108,6 @@ export default function DashboardQueue(): JSX.Element {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // fetch one page of tracks from the server
   const fetchQueuePage = useCallback(
     async (p: number, lim: number) => {
       if (!currentServerId) return;
@@ -135,7 +131,6 @@ export default function DashboardQueue(): JSX.Element {
         );
       } catch (err) {
         console.error("fetchQueuePage error", err);
-        // Per design: show professional empty state on failures.
         setTracks([]);
         setNowPlaying(null);
         setQueueLength(0);
@@ -152,7 +147,6 @@ export default function DashboardQueue(): JSX.Element {
     fetchQueuePage(page, limit);
   }, [currentServerId, page, limit, fetchQueuePage]);
 
-  // refresh current page when server reports queue updates
   useGuildWebSocket(currentServerId, {
     onQueueUpdate: async (qlen: number) => {
       setQueueLength(qlen);
@@ -168,7 +162,6 @@ export default function DashboardQueue(): JSX.Element {
   const onScroll = (e: React.UIEvent<HTMLDivElement>) =>
     setScrollTop(e.currentTarget.scrollTop);
 
-  // virtualization window
   const pageItemCount = tracks.length;
   const startIndex = Math.max(
     0,
@@ -181,7 +174,6 @@ export default function DashboardQueue(): JSX.Element {
   const topPadding = startIndex * ITEM_HEIGHT;
   const bottomPadding = Math.max(0, (pageItemCount - endIndex) * ITEM_HEIGHT);
 
-  // pagination helpers
   const goPrev = () => setPage((p) => Math.max(1, p - 1));
   const goNext = () => setPage((p) => Math.min(totalPages, p + 1));
   const changeLimit = (v: number) => {
@@ -189,7 +181,6 @@ export default function DashboardQueue(): JSX.Element {
     setPage(1);
   };
 
-  // optimistic UI actions (TODO: call backend/bot to perform real actions)
   const removeFromQueue = (id?: string) =>
     setTracks((prev) => prev.filter((t) => (id ? t.id !== id : true)));
   const clearQueue = () => {
@@ -202,8 +193,7 @@ export default function DashboardQueue(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center">
         <div>
           <h1 className="text-2xl font-bold text-foreground mb-2">Queue</h1>
           <p className="text-muted-foreground">
@@ -211,9 +201,13 @@ export default function DashboardQueue(): JSX.Element {
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* compact page size dropdown — matches aesthetic */}
-          <div style={{ width: 140 }}>
+        {/* controls aligned to right; selector is moved to far right */}
+        <div className="ml-auto flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={clearQueue}>
+            <Trash2 className="w-4 h-4 mr-2" /> Clear Queue
+          </Button>
+
+          <div style={{ width: 110 }}>
             <PageSizeSelector
               options={PAGE_OPTIONS}
               value={limit}
@@ -221,17 +215,9 @@ export default function DashboardQueue(): JSX.Element {
               storageKey={STORAGE_KEY_PAGE_SIZE}
             />
           </div>
-
-          <Button variant="outline" size="sm" onClick={clearQueue}>
-            <Trash2 className="w-4 h-4 mr-2" /> Clear Queue
-          </Button>
-          <Button variant="hero" size="sm" onClick={playAll}>
-            <Play className="w-4 h-4 mr-2" /> Play All
-          </Button>
         </div>
       </div>
 
-      {/* Queue Card */}
       <Card variant="glass">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -257,7 +243,6 @@ export default function DashboardQueue(): JSX.Element {
 
             {loading && <div className="p-4">Loading...</div>}
 
-            {/* Professional empty state */}
             {!loading && queueLength === 0 && (
               <div className="p-12 text-center text-muted-foreground">
                 <div className="mb-2 text-lg font-medium">Nothing in queue</div>
@@ -267,7 +252,6 @@ export default function DashboardQueue(): JSX.Element {
               </div>
             )}
 
-            {/* Virtualized page list */}
             {!loading && queueLength > 0 && tracks.length > 0 && (
               <div
                 ref={listRef}
@@ -374,7 +358,6 @@ export default function DashboardQueue(): JSX.Element {
               </div>
             )}
 
-            {/* Pagination controls */}
             {!loading && queueLength > 0 && (
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2">

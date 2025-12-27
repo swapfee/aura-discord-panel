@@ -9,7 +9,6 @@ import React, {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Play,
   Pause,
   Trash2,
   GripVertical,
@@ -187,9 +186,6 @@ export default function DashboardQueue(): JSX.Element {
     setTracks([]);
     setQueueLength(0);
   };
-  const playAll = () => {
-    if (tracks.length > 0) setNowPlayingIndex(0);
-  };
 
   return (
     <div className="space-y-6">
@@ -201,7 +197,7 @@ export default function DashboardQueue(): JSX.Element {
           </p>
         </div>
 
-        {/* controls aligned to right; selector is moved to far right */}
+        {/* controls aligned to right: Clear + Page selector */}
         <div className="ml-auto flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={clearQueue}>
             <Trash2 className="w-4 h-4 mr-2" /> Clear Queue
@@ -285,7 +281,7 @@ export default function DashboardQueue(): JSX.Element {
                           {realIndex === nowPlayingIndex ? (
                             <Pause className="w-4 h-4" />
                           ) : (
-                            <Play className="w-4 h-4" />
+                            <Pause className="w-4 h-4" />
                           )}
                         </Button>
                       </div>

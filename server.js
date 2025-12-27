@@ -297,6 +297,7 @@ app.get("/api/servers", async (req, res) => {
       }
     }
 
+    // Now map userGuilds into your server objects, defensively
     const servers = Array.isArray(userGuilds)
       ? userGuilds.map((g) => {
           const id = String(g?.id ?? g?.guildId ?? g?.discord_server_id ?? "");
@@ -314,6 +315,7 @@ app.get("/api/servers", async (req, res) => {
     return res.json({ servers });
   } catch (err) {
     console.error("[/api/servers] error:", err);
+    // don't leak internals — return empty list with 500
     return res.status(500).json({ servers: [] });
   }
 });
@@ -504,66 +506,96 @@ app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   broadcastToGuild(guildId, { type: "voice_update", activeListeners });
   res.json({ ok: true });
 });
+
+// server.js — add /api/servers/:serverId/queue
 app.get("/api/servers/:serverId/queue", async (req, res) => {
   const user = await requireUser(req);
   if (!user) return res.status(401).end();
 
   const { serverId } = req.params;
-  // page and limit query params (1-based page)
-  const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-  const limit = Math.min(
-    200,
-    Math.max(10, parseInt(String(req.query.limit || "50"), 10))
-  ); // clamp 10..200
-  const skip = (page - 1) * limit;
+  // parse page/limit with sane defaults
+  const page = Math.max(1, Number(req.query.page ?? 1));
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit ?? 50)));
 
   try {
-    // Project only the slice of tracks we need plus queueLength and nowPlaying
-    const proj = {
-      nowPlaying: 1,
-      queueLength: 1,
-      tracks: { $slice: [skip, limit] },
+    // read the queue document from BOT DB connection (Queue registered earlier)
+    const qdoc = await Queue.findOne({ guildId: serverId }).lean();
+
+    const tracksRaw = Array.isArray(qdoc?.tracks) ? qdoc.tracks : [];
+    const queueLength = tracksRaw.length;
+    const totalPages = Math.max(1, Math.ceil(queueLength / limit));
+
+    // page bounds
+    const safePage = Math.min(Math.max(1, page), totalPages);
+
+    // slice the tracks for the requested page (page is 1-based)
+    const start = (safePage - 1) * limit;
+    const end = start + limit;
+    const pageTracks = tracksRaw.slice(start, end);
+
+    // map DB track to front-end track shape
+    const mapTrack = (t, idx) => {
+      // duration: if durationMs exists produce "m:ss"
+      let duration = undefined;
+      if (typeof t.durationMs === "number") {
+        const s = Math.floor(t.durationMs / 1000);
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        duration = `${m}:${String(sec).padStart(2, "0")}`;
+      } else if (typeof t.duration === "string") {
+        duration = t.duration;
+      }
+
+      return {
+        id: String(t.id ?? t.url ?? `pos-${start + idx}`),
+        title: t.title ?? t.info?.title ?? null,
+        artist: t.artist ?? t.info?.author ?? null,
+        duration,
+        durationMs: typeof t.durationMs === "number" ? t.durationMs : undefined,
+        requestedBy: t.requestedBy ?? t.requester ?? null,
+        cover: t.coverUrl ?? null, // server uses coverUrl in DB
+        position: start + idx + 1,
+      };
     };
 
-    const queueDoc = await Queue.findOne({ guildId: serverId }, proj).lean();
+    const tracks = pageTracks.map((t, i) => mapTrack(t, i));
 
-    if (!queueDoc) {
-      return res.json({
-        nowPlaying: null,
-        tracks: [],
-        queueLength: 0,
-        page,
-        limit,
-        totalPages: 0,
-      });
+    // nowPlaying mapping (if present)
+    let nowPlaying = null;
+    if (qdoc && qdoc.nowPlaying) {
+      const np = qdoc.nowPlaying;
+      let duration = undefined;
+      if (typeof np.durationMs === "number") {
+        const s = Math.floor(np.durationMs / 1000);
+        duration = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      }
+      nowPlaying = {
+        title: np.title ?? null,
+        artist: np.artist ?? null,
+        duration,
+        durationMs:
+          typeof np.durationMs === "number" ? np.durationMs : undefined,
+        cover: np.coverUrl ?? null,
+      };
     }
 
-    const qlen =
-      typeof queueDoc.queueLength === "number"
-        ? queueDoc.queueLength
-        : Array.isArray(queueDoc.tracks)
-        ? queueDoc.tracks.length
-        : 0;
-
-    const totalPages = Math.max(1, Math.ceil(qlen / limit));
-
     return res.json({
-      nowPlaying: queueDoc.nowPlaying ?? null,
-      tracks: queueDoc.tracks ?? [],
-      queueLength: qlen,
-      page,
+      nowPlaying,
+      tracks,
+      queueLength,
+      page: safePage,
       limit,
       totalPages,
     });
   } catch (err) {
-    console.error("[QUEUE ROUTE ERROR]", err);
+    console.error("[QUEUE ERROR]", err);
     return res.status(500).json({
       nowPlaying: null,
       tracks: [],
       queueLength: 0,
-      page,
+      page: 1,
       limit,
-      totalPages: 0,
+      totalPages: 1,
     });
   }
 });

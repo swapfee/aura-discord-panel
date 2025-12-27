@@ -1,4 +1,5 @@
-// server.js
+// server.js (updated)
+// ESM imports kept
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -77,7 +78,13 @@ const Queue = registerQueue(botDb);
 const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 
 function cookieOpts() {
-  return { httpOnly: true, secure: true, sameSite: "lax", path: "/" };
+  return {
+    httpOnly: true,
+    // Only require secure cookies in production — helps with local/dev
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  };
 }
 
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
@@ -427,10 +434,120 @@ app.post("/auth/logout", (_req, res) => {
   res.status(204).end();
 });
 
-// serve frontend
-const distPath = path.join(__dirname, "dist");
-app.use(express.static(distPath));
-app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
+// internal bot events — broadcast-only
+app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
+  const { guildId, title, artist } = req.body;
+  broadcastToGuild(guildId, { type: "song_played", title, artist });
+  res.json({ ok: true });
+});
+
+app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
+  const { guildId, queueLength } = req.body;
+  // broadcast-only — DO NOT mutate DB here
+  broadcastToGuild(guildId, { type: "queue_update", queueLength });
+  res.json({ ok: true });
+});
+
+app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
+  const { guildId, activeListeners } = req.body;
+  broadcastToGuild(guildId, { type: "voice_update", activeListeners });
+  res.json({ ok: true });
+});
+
+// Robust /queue route — put this among your other API routes
+app.get("/api/servers/:serverId/queue", requireUser, async (req, res) => {
+  try {
+    // requireUser returns 401 if not logged in
+    const { serverId } = req.params;
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit || 50)));
+
+    // Read the queue document using the Queue model (registered against botDb)
+    const qdoc = await Queue.findOne({ guildId: serverId }).lean();
+
+    const tracksRaw = Array.isArray(qdoc?.tracks) ? qdoc.tracks : [];
+    const queueLength = tracksRaw.length;
+    const totalPages = Math.max(1, Math.ceil(queueLength / limit));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * limit;
+    const pageTracks = tracksRaw.slice(start, start + limit);
+
+    const mapTrack = (t, idx) => {
+      let duration;
+      if (typeof t.durationMs === "number") {
+        const s = Math.floor(t.durationMs / 1000);
+        duration = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      } else if (typeof t.duration === "string") {
+        duration = t.duration;
+      }
+      return {
+        id: String(t.id ?? t.url ?? `pos-${start + idx}`),
+        title: t.title ?? t.info?.title ?? null,
+        artist: t.artist ?? t.info?.author ?? null,
+        duration,
+        durationMs: typeof t.durationMs === "number" ? t.durationMs : undefined,
+        requestedBy: t.requestedBy ?? t.requester ?? null,
+        cover: t.coverUrl ?? t.cover ?? null,
+        position: start + idx + 1,
+      };
+    };
+
+    const tracks = pageTracks.map((t, i) => mapTrack(t, i));
+
+    let nowPlaying = null;
+    if (qdoc?.nowPlaying) {
+      const np = qdoc.nowPlaying;
+      let duration;
+      if (typeof np.durationMs === "number") {
+        const s = Math.floor(np.durationMs / 1000);
+        duration = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      }
+      nowPlaying = {
+        title: np.title ?? null,
+        artist: np.artist ?? null,
+        duration,
+        durationMs:
+          typeof np.durationMs === "number" ? np.durationMs : undefined,
+        cover: np.coverUrl ?? np.cover ?? null,
+      };
+    }
+
+    return res.json({
+      nowPlaying,
+      tracks,
+      queueLength,
+      page: safePage,
+      limit,
+      totalPages,
+    });
+  } catch (err) {
+    console.error("[/api/servers/:serverId/queue] error", err);
+    return res.status(500).json({
+      nowPlaying: null,
+      tracks: [],
+      queueLength: 0,
+      page: 1,
+      limit: Number(req.query.limit) || 50,
+      totalPages: 1,
+      error: "internal_server_error",
+    });
+  }
+});
+
+// final express error handler
+app.use((err, req, res, next) => {
+  console.error(
+    "[Express] error handler:",
+    err && (err.stack || err.message || err)
+  );
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: "Internal server error" });
+});
+
+// serve frontend - MOVE THESE LINES TO THE BOTTOM
+// const distPath = path.join(__dirname, "dist");
+// app.use(express.static(distPath));
+// app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
 
 const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
   console.log("Server running")
@@ -487,7 +604,6 @@ wss.on("connection", async (ws, req) => {
   });
 });
 
-/* internal bot events — broadcast-only */
 app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
   const { guildId, title, artist } = req.body;
   broadcastToGuild(guildId, { type: "song_played", title, artist });
@@ -496,7 +612,6 @@ app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
 
 app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
   const { guildId, queueLength } = req.body;
-  // broadcast-only — DO NOT mutate DB here
   broadcastToGuild(guildId, { type: "queue_update", queueLength });
   res.json({ ok: true });
 });
@@ -505,109 +620,6 @@ app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
   const { guildId, activeListeners } = req.body;
   broadcastToGuild(guildId, { type: "voice_update", activeListeners });
   res.json({ ok: true });
-});
-
-// server.js — add /api/servers/:serverId/queue
-app.get("/api/servers/:serverId/queue", async (req, res) => {
-  const user = await requireUser(req);
-  if (!user) return res.status(401).end();
-
-  const { serverId } = req.params;
-  // parse page/limit with sane defaults
-  const page = Math.max(1, Number(req.query.page ?? 1));
-  const limit = Math.max(1, Math.min(500, Number(req.query.limit ?? 50)));
-
-  try {
-    // read the queue document from BOT DB connection (Queue registered earlier)
-    const qdoc = await Queue.findOne({ guildId: serverId }).lean();
-
-    const tracksRaw = Array.isArray(qdoc?.tracks) ? qdoc.tracks : [];
-    const queueLength = tracksRaw.length;
-    const totalPages = Math.max(1, Math.ceil(queueLength / limit));
-
-    // page bounds
-    const safePage = Math.min(Math.max(1, page), totalPages);
-
-    // slice the tracks for the requested page (page is 1-based)
-    const start = (safePage - 1) * limit;
-    const end = start + limit;
-    const pageTracks = tracksRaw.slice(start, end);
-
-    // map DB track to front-end track shape
-    const mapTrack = (t, idx) => {
-      // duration: if durationMs exists produce "m:ss"
-      let duration = undefined;
-      if (typeof t.durationMs === "number") {
-        const s = Math.floor(t.durationMs / 1000);
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        duration = `${m}:${String(sec).padStart(2, "0")}`;
-      } else if (typeof t.duration === "string") {
-        duration = t.duration;
-      }
-
-      return {
-        id: String(t.id ?? t.url ?? `pos-${start + idx}`),
-        title: t.title ?? t.info?.title ?? null,
-        artist: t.artist ?? t.info?.author ?? null,
-        duration,
-        durationMs: typeof t.durationMs === "number" ? t.durationMs : undefined,
-        requestedBy: t.requestedBy ?? t.requester ?? null,
-        cover: t.coverUrl ?? null, // server uses coverUrl in DB
-        position: start + idx + 1,
-      };
-    };
-
-    const tracks = pageTracks.map((t, i) => mapTrack(t, i));
-
-    // nowPlaying mapping (if present)
-    let nowPlaying = null;
-    if (qdoc && qdoc.nowPlaying) {
-      const np = qdoc.nowPlaying;
-      let duration = undefined;
-      if (typeof np.durationMs === "number") {
-        const s = Math.floor(np.durationMs / 1000);
-        duration = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-      }
-      nowPlaying = {
-        title: np.title ?? null,
-        artist: np.artist ?? null,
-        duration,
-        durationMs:
-          typeof np.durationMs === "number" ? np.durationMs : undefined,
-        cover: np.coverUrl ?? null,
-      };
-    }
-
-    return res.json({
-      nowPlaying,
-      tracks,
-      queueLength,
-      page: safePage,
-      limit,
-      totalPages,
-    });
-  } catch (err) {
-    console.error("[QUEUE ERROR]", err);
-    return res.status(500).json({
-      nowPlaying: null,
-      tracks: [],
-      queueLength: 0,
-      page: 1,
-      limit,
-      totalPages: 1,
-    });
-  }
-});
-
-// final express error handler
-app.use((err, req, res, next) => {
-  console.error(
-    "[Express] error handler:",
-    err && (err.stack || err.message || err)
-  );
-  if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: "Internal server error" });
 });
 
 // process handlers

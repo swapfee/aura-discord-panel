@@ -1,5 +1,5 @@
-// server.js (updated)
-// ESM imports kept
+// server.js (final updated)
+import fs from "fs";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -80,7 +80,7 @@ const JWT_KEY = new TextEncoder().encode(JWT_SECRET);
 function cookieOpts() {
   return {
     httpOnly: true,
-    // Only require secure cookies in production — helps with local/dev
+    // Only require secure cookies in production (helps with local/dev).
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
@@ -213,29 +213,37 @@ app.get(
   "/auth/discord/callback",
   passport.authenticate("discord", { session: false, failureRedirect: "/" }),
   async (req, res) => {
-    const u = req.user;
-    await saveDiscordTokens({
-      userId: u.id,
-      accessToken: u.accessToken,
-      refreshToken: u.refreshToken,
-      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
-      scope: "identify email guilds",
-      tokenType: "Bearer",
-    });
+    try {
+      const u = req.user;
+      await saveDiscordTokens({
+        userId: u.id,
+        accessToken: u.accessToken,
+        refreshToken: u.refreshToken,
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        scope: "identify email guilds",
+        tokenType: "Bearer",
+      });
 
-    const jwt = await new SignJWT({
-      username: u.username,
-      email: u.email,
-      avatar: u.avatar,
-    })
-      .setProtectedHeader({ alg: "HS256" })
-      .setSubject(u.id)
-      .setIssuedAt()
-      .setExpirationTime("2h")
-      .sign(JWT_KEY);
+      const jwt = await new SignJWT({
+        username: u.username,
+        email: u.email,
+        avatar: u.avatar,
+      })
+        .setProtectedHeader({ alg: "HS256" })
+        .setSubject(u.id)
+        .setIssuedAt()
+        .setExpirationTime("2h")
+        .sign(JWT_KEY);
 
-    res.cookie("session", jwt, { ...cookieOpts(), maxAge: 2 * 60 * 60 * 1000 });
-    res.redirect("/dashboard");
+      res.cookie("session", jwt, {
+        ...cookieOpts(),
+        maxAge: 2 * 60 * 60 * 1000,
+      });
+      res.redirect("/dashboard");
+    } catch (err) {
+      console.error("[/auth/discord/callback] error:", err);
+      res.redirect("/");
+    }
   }
 );
 
@@ -435,6 +443,15 @@ app.post("/auth/logout", (_req, res) => {
 });
 
 // internal bot events — broadcast-only
+let wss; // declared early so broadcastToGuild can reference it
+function broadcastToGuild(guildId, payload) {
+  if (!wss) return;
+  for (const client of wss.clients) {
+    if (client.readyState === 1 && client.guildId === guildId)
+      client.send(JSON.stringify(payload));
+  }
+}
+
 app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
   const { guildId, title, artist } = req.body;
   broadcastToGuild(guildId, { type: "song_played", title, artist });
@@ -544,10 +561,18 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: "Internal server error" });
 });
 
-// serve frontend - MOVE THESE LINES TO THE BOTTOM
-// const distPath = path.join(__dirname, "dist");
-// app.use(express.static(distPath));
-// app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
+// serve frontend (must be after API routes and error handler)
+const distPath = path.join(__dirname, "dist");
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
+} else {
+  console.warn(
+    "[server] dist directory not found at",
+    distPath,
+    "— frontend won't be served."
+  );
+}
 
 const server = app.listen(Number(PORT || 3000), "0.0.0.0", () =>
   console.log("Server running")
@@ -568,14 +593,7 @@ server.on("clientError", (err, socket) => {
 });
 
 // WebSocket server
-const wss = new WebSocketServer({ server });
-
-function broadcastToGuild(guildId, payload) {
-  for (const client of wss.clients) {
-    if (client.readyState === 1 && client.guildId === guildId)
-      client.send(JSON.stringify(payload));
-  }
-}
+wss = new WebSocketServer({ server });
 
 wss.on("connection", async (ws, req) => {
   try {
@@ -604,25 +622,8 @@ wss.on("connection", async (ws, req) => {
   });
 });
 
-app.post("/api/internal/song-played", requireInternalKey, (req, res) => {
-  const { guildId, title, artist } = req.body;
-  broadcastToGuild(guildId, { type: "song_played", title, artist });
-  res.json({ ok: true });
-});
-
-app.post("/api/internal/queue-update", requireInternalKey, (req, res) => {
-  const { guildId, queueLength } = req.body;
-  broadcastToGuild(guildId, { type: "queue_update", queueLength });
-  res.json({ ok: true });
-});
-
-app.post("/api/internal/voice-update", requireInternalKey, (req, res) => {
-  const { guildId, activeListeners } = req.body;
-  broadcastToGuild(guildId, { type: "voice_update", activeListeners });
-  res.json({ ok: true });
-});
-
-// process handlers
+/* internal bot events — broadcast-only
+   note: broadcastToGuild referenced earlier uses the wss variable declared above */
 process.on("unhandledRejection", (reason) =>
   console.error("[process] unhandledRejection:", reason)
 );

@@ -1,7 +1,6 @@
 // src/components/dashboard/PageSizeSelector.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface Props {
   options?: number[];
@@ -23,20 +22,25 @@ export default function PageSizeSelector({
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // load from storage if present
+    // load saved value, else prop or first option
     try {
-      const s = localStorage.getItem(storageKey);
-      if (s) {
-        const n = Number(s);
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const n = Number(raw);
         if (!Number.isNaN(n) && options.includes(n)) {
           setSelected(n);
           onChange?.(n);
+          return;
         }
-      } else if (typeof value === "number") {
-        setSelected(value);
       }
     } catch {
-      // ignore storage access errors
+      // ignore storage errors
+    }
+    if (typeof value === "number" && options.includes(value)) {
+      setSelected(value);
+    } else {
+      setSelected(options[0]);
+      onChange?.(options[0]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -45,7 +49,7 @@ export default function PageSizeSelector({
     if (typeof value === "number" && value !== selected) setSelected(value);
   }, [value, selected]);
 
-  // click outside closes dropdown
+  // close on outside click
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -68,7 +72,6 @@ export default function PageSizeSelector({
 
   return (
     <div className="relative inline-block" ref={rootRef}>
-      {/* button: dark pill with big number */}
       <button
         className="flex items-center gap-3 h-11 px-3 rounded-md bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
         onClick={() => setIsOpen((s) => !s)}
@@ -76,13 +79,14 @@ export default function PageSizeSelector({
         aria-expanded={isOpen}
         type="button"
       >
+        {/* small rounded badge with number */}
         <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center">
           <span className="text-sm font-semibold text-foreground">
             {selected}
           </span>
         </div>
 
-        {/* display small number text to right (matches screenshot) */}
+        {/* single number (keeps the compact look) */}
         <div className="text-sm font-medium text-foreground">{selected}</div>
 
         <div className="ml-2">
@@ -100,7 +104,7 @@ export default function PageSizeSelector({
           aria-label="Page size"
           className="absolute mt-2 w-36 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in"
         >
-          <div className="p-2 space-y-2">
+          <div className="p-1">
             {options.map((opt) => {
               const isSel = opt === selected;
               return (
@@ -116,17 +120,14 @@ export default function PageSizeSelector({
                       : "hover:bg-secondary"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
-                      <span className="text-base font-semibold">{opt}</span>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-foreground">
-                        {opt}
-                      </div>
+                  {/* single centered number */}
+                  <div className="flex-1 flex items-center">
+                    <div className="text-lg font-semibold text-foreground">
+                      {opt}
                     </div>
                   </div>
 
+                  {/* checkmark on right when selected */}
                   {isSel ? <Check className="w-4 h-4 text-primary" /> : null}
                 </button>
               );

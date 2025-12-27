@@ -21,8 +21,8 @@ export default function PageSizeSelector({
   const [selected, setSelected] = useState<number>(value ?? options[0]);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Restore or initialize selected value
   useEffect(() => {
+    // restore saved value or initialize
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -46,12 +46,11 @@ export default function PageSizeSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If parent controls the value, sync
   useEffect(() => {
     if (typeof value === "number" && value !== selected) setSelected(value);
   }, [value, selected]);
 
-  // Close on outside click
+  // close when clicking outside
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -88,7 +87,7 @@ export default function PageSizeSelector({
           </span>
         </div>
 
-        {/* number text to the right, compact */}
+        {/* single number text to the right (keeps the compact look) */}
         <div className="text-sm font-medium text-foreground">{selected}</div>
 
         <div className="ml-2">
@@ -122,23 +121,16 @@ export default function PageSizeSelector({
                       : "hover:bg-secondary"
                   }`}
                 >
-                  {/* left: small rounded badge */}
+                  {/* ONLY the single rounded badge on the left — no duplicate number */}
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
                       <span className="text-base font-semibold text-foreground">
                         {opt}
                       </span>
                     </div>
-
-                    {/* center: the same number as text (compact) */}
-                    <div>
-                      <div className="text-sm font-medium text-foreground">
-                        {opt}
-                      </div>
-                    </div>
                   </div>
 
-                  {/* right: checkmark if selected */}
+                  {/* checkmark on the right if selected */}
                   {isSel ? <Check className="w-4 h-4 text-primary" /> : null}
                 </button>
               );

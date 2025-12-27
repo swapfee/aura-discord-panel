@@ -1,5 +1,11 @@
 // src/components/DashboardQueue.tsx
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +20,7 @@ import {
 } from "lucide-react";
 import { useBot } from "@/contexts/BotContext";
 import { useGuildWebSocket } from "@/hooks/useGuildWebSocket";
-
-import ServerSelector, { Server } from "@/components/dashboard/ServerSelector";
+import PageSizeSelector from "@/components/dashboard/PageSizeSelector";
 
 type QueueApiTrack = {
   id?: string;
@@ -39,32 +44,47 @@ type QueuePageResponse = {
 
 const ITEM_HEIGHT = 64;
 const VIRTUAL_BUFFER = 3;
-const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 
-const makePageSizeServers = (options: number[]): Server[] =>
-  options.map((n) => ({
-    id: `pagesize-${n}`,
-    discord_server_id: String(n),
-    server_name: `${n}`,
-    server_icon: null,
-    member_count: null,
-    bot_connected: true,
-    can_invite_bot: false,
-  }));
+/**
+ * DashboardQueue
+ * - uses server-side pagination
+ * - PageSizeSelector for page size (styled like ServerSelector)
+ * - virtualization of rows within current page window
+ * - professional empty state
+ */
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 50;
+const PAGE_OPTIONS = [20, 50, 100, 200];
 
-const DashboardQueue: React.FC = () => {
+export default function DashboardQueue(): JSX.Element {
   const { currentServerId } = useBot();
+
+  // Try restore page-size from localStorage (same key PageSizeSelector uses)
+  const initialLimit = useMemo(() => {
+    try {
+      const v = localStorage.getItem("aura:pageSize");
+      if (v) {
+        const n = Number(v);
+        if (!Number.isNaN(n) && PAGE_OPTIONS.includes(n)) return n;
+      }
+    } catch {
+      /* empty */
+    }
+    return DEFAULT_LIMIT;
+  }, []);
 
   const [tracks, setTracks] = useState<QueueApiTrack[]>([]);
   const [nowPlayingIndex, setNowPlayingIndex] = useState<number>(0);
   const [nowPlaying, setNowPlaying] = useState<QueueApiTrack | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
 
-  const [page, setPage] = useState<number>(1);
-  const [limit, setLimit] = useState<number>(50);
+  // pagination
+  const [page, setPage] = useState<number>(DEFAULT_PAGE);
+  const [limit, setLimit] = useState<number>(initialLimit);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [queueLength, setQueueLength] = useState<number>(0);
 
+  // virtualization
   const listRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(400);
@@ -78,8 +98,9 @@ const DashboardQueue: React.FC = () => {
     return () => ro.disconnect();
   }, []);
 
-  const visibleCount = Math.ceil(containerHeight / ITEM_HEIGHT) || 5;
+  const visibleCount = Math.max(3, Math.ceil(containerHeight / ITEM_HEIGHT));
 
+  // convert varying duration forms to seconds
   const durationToSeconds = (t?: QueueApiTrack) => {
     if (!t) return 0;
     if (typeof t.durationMs === "number")
@@ -100,6 +121,7 @@ const DashboardQueue: React.FC = () => {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
+  // fetch one page of the queue
   const fetchQueuePage = useCallback(
     async (p: number, lim: number) => {
       if (!currentServerId) return;
@@ -116,11 +138,14 @@ const DashboardQueue: React.FC = () => {
         setNowPlaying(data.nowPlaying ?? null);
         setQueueLength(data.queueLength ?? 0);
         setTotalPages(Math.max(1, data.totalPages ?? 1));
+
+        // keep nowPlayingIndex bounded
         setNowPlayingIndex((prev) =>
           Math.min(prev, Math.max(0, (data.tracks?.length ?? 0) - 1))
         );
       } catch (err) {
         console.error("fetchQueuePage error", err);
+        // Show a professional empty state on failure (per your request)
         setTracks([]);
         setNowPlaying(null);
         setQueueLength(0);
@@ -137,6 +162,7 @@ const DashboardQueue: React.FC = () => {
     fetchQueuePage(page, limit);
   }, [currentServerId, page, limit, fetchQueuePage]);
 
+  // websocket updates: refresh current page on queue_update
   useGuildWebSocket(currentServerId, {
     onQueueUpdate: async (qlen: number) => {
       setQueueLength(qlen);
@@ -145,6 +171,7 @@ const DashboardQueue: React.FC = () => {
         setNowPlaying(null);
         return;
       }
+      // If queue changed, refresh current page — safe and simple
       await fetchQueuePage(page, limit);
     },
   });
@@ -152,6 +179,7 @@ const DashboardQueue: React.FC = () => {
   const onScroll = (e: React.UIEvent<HTMLDivElement>) =>
     setScrollTop(e.currentTarget.scrollTop);
 
+  // virtual window calculations
   const pageItemCount = tracks.length;
   const startIndex = Math.max(
     0,
@@ -164,6 +192,7 @@ const DashboardQueue: React.FC = () => {
   const topPadding = startIndex * ITEM_HEIGHT;
   const bottomPadding = Math.max(0, (pageItemCount - endIndex) * ITEM_HEIGHT);
 
+  // pagination controls
   const goPrev = () => setPage((p) => Math.max(1, p - 1));
   const goNext = () => setPage((p) => Math.min(totalPages, p + 1));
   const changeLimit = (v: number) => {
@@ -171,6 +200,7 @@ const DashboardQueue: React.FC = () => {
     setPage(1);
   };
 
+  // optimistic UI actions; TODO: wire to backend/bot for real effects
   const removeFromQueue = (id?: string) =>
     setTracks((prev) => prev.filter((t) => (id ? t.id !== id : true)));
   const clearQueue = () => {
@@ -181,18 +211,12 @@ const DashboardQueue: React.FC = () => {
     if (tracks.length > 0) setNowPlayingIndex(0);
   };
 
-  // Page-size selector using ServerSelector
-  const pageSizeServers = React.useMemo(
-    () => makePageSizeServers(PAGE_SIZE_OPTIONS),
-    []
-  );
-  const onPageSizeChange = (serverId: string) => {
-    const v = Number(serverId);
-    if (!Number.isNaN(v)) changeLimit(v);
-  };
+  // page-size selector integration
+  const pageSizeOptions = PAGE_OPTIONS;
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground mb-2">Queue</h1>
@@ -204,12 +228,12 @@ const DashboardQueue: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             <label className="text-xs text-muted-foreground">Page size</label>
+            {/* PageSizeSelector (styled like ServerSelector) */}
             <div style={{ width: 140 }}>
-              <ServerSelector
-                servers={pageSizeServers}
-                loading={false}
-                collapsed={false}
-                onServerChange={onPageSizeChange}
+              <PageSizeSelector
+                options={pageSizeOptions}
+                value={limit}
+                onChange={(v) => changeLimit(v)}
                 storageKey="aura:pageSize"
               />
             </div>
@@ -224,6 +248,7 @@ const DashboardQueue: React.FC = () => {
         </div>
       </div>
 
+      {/* Card */}
       <Card variant="glass">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -231,6 +256,7 @@ const DashboardQueue: React.FC = () => {
             Up Next
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="space-y-2">
             <div className="grid grid-cols-12 gap-4 px-3 py-2 text-xs text-muted-foreground border-b border-border">
@@ -247,13 +273,20 @@ const DashboardQueue: React.FC = () => {
               <div className="col-span-2" />
             </div>
 
+            {/* Loading */}
             {loading && <div className="p-4">Loading...</div>}
+
+            {/* Professional empty state */}
             {!loading && queueLength === 0 && (
-              <div className="p-12 text-muted-foreground text-center">
-                Nothing in queue
+              <div className="p-12 text-center text-muted-foreground">
+                <div className="mb-2 text-lg font-medium">Nothing in queue</div>
+                <div className="text-sm opacity-80">
+                  Add songs to get started
+                </div>
               </div>
             )}
 
+            {/* Virtualized page list */}
             {!loading && queueLength > 0 && tracks.length > 0 && (
               <div
                 ref={listRef}
@@ -302,6 +335,7 @@ const DashboardQueue: React.FC = () => {
                             />
                           ) : null}
                         </div>
+
                         <div className="min-w-0">
                           <p
                             className={`text-sm font-medium truncate ${
@@ -359,6 +393,7 @@ const DashboardQueue: React.FC = () => {
               </div>
             )}
 
+            {/* Pagination controls */}
             {!loading && queueLength > 0 && (
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2">
@@ -396,6 +431,7 @@ const DashboardQueue: React.FC = () => {
                     Next
                   </Button>
                 </div>
+
                 <div className="text-sm text-muted-foreground">
                   Showing {(page - 1) * limit + 1}—
                   {Math.min(page * limit, queueLength)} of {queueLength}
@@ -407,6 +443,4 @@ const DashboardQueue: React.FC = () => {
       </Card>
     </div>
   );
-};
-
-export default DashboardQueue;
+}

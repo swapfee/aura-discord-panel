@@ -21,8 +21,8 @@ export default function PageSizeSelector({
   const [selected, setSelected] = useState<number>(value ?? options[0]);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  // Restore selection from localStorage or initialize
   useEffect(() => {
-    // restore saved value or initialize
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -34,7 +34,7 @@ export default function PageSizeSelector({
         }
       }
     } catch {
-      // ignore storage errors
+      // ignore localStorage errors
     }
 
     if (typeof value === "number" && options.includes(value)) {
@@ -46,11 +46,12 @@ export default function PageSizeSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // keep controlled value in sync
   useEffect(() => {
     if (typeof value === "number" && value !== selected) setSelected(value);
   }, [value, selected]);
 
-  // close when clicking outside
+  // close on outside click
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current) return;
@@ -73,22 +74,20 @@ export default function PageSizeSelector({
 
   return (
     <div className="relative inline-block" ref={rootRef}>
+      {/* Main button: only the badge + chevron (no duplicate number) */}
       <button
         className="flex items-center gap-3 h-11 px-3 rounded-md bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
         onClick={() => setIsOpen((s) => !s)}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
+        aria-label={`Page size: ${selected}`}
         type="button"
       >
-        {/* left rounded badge */}
         <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center">
           <span className="text-sm font-semibold text-foreground">
             {selected}
           </span>
         </div>
-
-        {/* single number text to the right (keeps the compact look) */}
-        <div className="text-sm font-medium text-foreground">{selected}</div>
 
         <div className="ml-2">
           <ChevronDown
@@ -121,7 +120,7 @@ export default function PageSizeSelector({
                       : "hover:bg-secondary"
                   }`}
                 >
-                  {/* ONLY the single rounded badge on the left — no duplicate number */}
+                  {/* only a single badge (left) — no duplicate text */}
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
                       <span className="text-base font-semibold text-foreground">

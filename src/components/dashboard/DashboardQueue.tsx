@@ -44,33 +44,24 @@ type QueuePageResponse = {
 
 const ITEM_HEIGHT = 64;
 const VIRTUAL_BUFFER = 3;
-
-/**
- * DashboardQueue
- * - uses server-side pagination
- * - PageSizeSelector for page size (styled like ServerSelector)
- * - virtualization of rows within current page window
- * - professional empty state
- */
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 50;
 const PAGE_OPTIONS = [20, 50, 100, 200];
+const STORAGE_KEY_PAGE_SIZE = "aura:pageSize";
 
 export default function DashboardQueue(): JSX.Element {
   const { currentServerId } = useBot();
 
-  // Try restore page-size from localStorage (same key PageSizeSelector uses)
+  // initial page-size from localStorage (fallback to 50)
   const initialLimit = useMemo(() => {
     try {
-      const v = localStorage.getItem("aura:pageSize");
-      if (v) {
-        const n = Number(v);
+      const raw = localStorage.getItem(STORAGE_KEY_PAGE_SIZE);
+      if (raw) {
+        const n = Number(raw);
         if (!Number.isNaN(n) && PAGE_OPTIONS.includes(n)) return n;
       }
     } catch {
-      /* empty */
+      /* ignore storage errors */
     }
-    return DEFAULT_LIMIT;
+    return 50;
   }, []);
 
   const [tracks, setTracks] = useState<QueueApiTrack[]>([]);
@@ -79,7 +70,7 @@ export default function DashboardQueue(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false);
 
   // pagination
-  const [page, setPage] = useState<number>(DEFAULT_PAGE);
+  const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(initialLimit);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [queueLength, setQueueLength] = useState<number>(0);
@@ -100,7 +91,6 @@ export default function DashboardQueue(): JSX.Element {
 
   const visibleCount = Math.max(3, Math.ceil(containerHeight / ITEM_HEIGHT));
 
-  // convert varying duration forms to seconds
   const durationToSeconds = (t?: QueueApiTrack) => {
     if (!t) return 0;
     if (typeof t.durationMs === "number")
@@ -121,7 +111,7 @@ export default function DashboardQueue(): JSX.Element {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // fetch one page of the queue
+  // fetch one page of tracks from the server
   const fetchQueuePage = useCallback(
     async (p: number, lim: number) => {
       if (!currentServerId) return;
@@ -129,7 +119,9 @@ export default function DashboardQueue(): JSX.Element {
       try {
         const res = await fetch(
           `/api/servers/${currentServerId}/queue?page=${p}&limit=${lim}`,
-          { credentials: "include" }
+          {
+            credentials: "include",
+          }
         );
         if (!res.ok) throw new Error("Failed to fetch queue");
         const data = (await res.json()) as QueuePageResponse;
@@ -138,14 +130,12 @@ export default function DashboardQueue(): JSX.Element {
         setNowPlaying(data.nowPlaying ?? null);
         setQueueLength(data.queueLength ?? 0);
         setTotalPages(Math.max(1, data.totalPages ?? 1));
-
-        // keep nowPlayingIndex bounded
         setNowPlayingIndex((prev) =>
           Math.min(prev, Math.max(0, (data.tracks?.length ?? 0) - 1))
         );
       } catch (err) {
         console.error("fetchQueuePage error", err);
-        // Show a professional empty state on failure (per your request)
+        // Per design: show professional empty state on failures.
         setTracks([]);
         setNowPlaying(null);
         setQueueLength(0);
@@ -162,7 +152,7 @@ export default function DashboardQueue(): JSX.Element {
     fetchQueuePage(page, limit);
   }, [currentServerId, page, limit, fetchQueuePage]);
 
-  // websocket updates: refresh current page on queue_update
+  // refresh current page when server reports queue updates
   useGuildWebSocket(currentServerId, {
     onQueueUpdate: async (qlen: number) => {
       setQueueLength(qlen);
@@ -171,7 +161,6 @@ export default function DashboardQueue(): JSX.Element {
         setNowPlaying(null);
         return;
       }
-      // If queue changed, refresh current page — safe and simple
       await fetchQueuePage(page, limit);
     },
   });
@@ -179,7 +168,7 @@ export default function DashboardQueue(): JSX.Element {
   const onScroll = (e: React.UIEvent<HTMLDivElement>) =>
     setScrollTop(e.currentTarget.scrollTop);
 
-  // virtual window calculations
+  // virtualization window
   const pageItemCount = tracks.length;
   const startIndex = Math.max(
     0,
@@ -192,7 +181,7 @@ export default function DashboardQueue(): JSX.Element {
   const topPadding = startIndex * ITEM_HEIGHT;
   const bottomPadding = Math.max(0, (pageItemCount - endIndex) * ITEM_HEIGHT);
 
-  // pagination controls
+  // pagination helpers
   const goPrev = () => setPage((p) => Math.max(1, p - 1));
   const goNext = () => setPage((p) => Math.min(totalPages, p + 1));
   const changeLimit = (v: number) => {
@@ -200,7 +189,7 @@ export default function DashboardQueue(): JSX.Element {
     setPage(1);
   };
 
-  // optimistic UI actions; TODO: wire to backend/bot for real effects
+  // optimistic UI actions (TODO: call backend/bot to perform real actions)
   const removeFromQueue = (id?: string) =>
     setTracks((prev) => prev.filter((t) => (id ? t.id !== id : true)));
   const clearQueue = () => {
@@ -210,9 +199,6 @@ export default function DashboardQueue(): JSX.Element {
   const playAll = () => {
     if (tracks.length > 0) setNowPlayingIndex(0);
   };
-
-  // page-size selector integration
-  const pageSizeOptions = PAGE_OPTIONS;
 
   return (
     <div className="space-y-6">
@@ -226,17 +212,14 @@ export default function DashboardQueue(): JSX.Element {
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3">
-            <label className="text-xs text-muted-foreground">Page size</label>
-            {/* PageSizeSelector (styled like ServerSelector) */}
-            <div style={{ width: 140 }}>
-              <PageSizeSelector
-                options={pageSizeOptions}
-                value={limit}
-                onChange={(v) => changeLimit(v)}
-                storageKey="aura:pageSize"
-              />
-            </div>
+          {/* compact page size dropdown — matches aesthetic */}
+          <div style={{ width: 140 }}>
+            <PageSizeSelector
+              options={PAGE_OPTIONS}
+              value={limit}
+              onChange={(v) => changeLimit(v)}
+              storageKey={STORAGE_KEY_PAGE_SIZE}
+            />
           </div>
 
           <Button variant="outline" size="sm" onClick={clearQueue}>
@@ -248,12 +231,11 @@ export default function DashboardQueue(): JSX.Element {
         </div>
       </div>
 
-      {/* Card */}
+      {/* Queue Card */}
       <Card variant="glass">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ListMusic className="w-5 h-5 text-primary" />
-            Up Next
+            <ListMusic className="w-5 h-5 text-primary" /> Up Next
           </CardTitle>
         </CardHeader>
 
@@ -273,7 +255,6 @@ export default function DashboardQueue(): JSX.Element {
               <div className="col-span-2" />
             </div>
 
-            {/* Loading */}
             {loading && <div className="p-4">Loading...</div>}
 
             {/* Professional empty state */}

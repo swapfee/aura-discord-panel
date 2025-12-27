@@ -1,146 +1,133 @@
 // src/components/dashboard/PageSizeSelector.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
-interface PageSizeSelectorProps {
-  options?: number[]; // list of page sizes to show
+interface Props {
+  options?: number[];
   value?: number;
   onChange?: (v: number) => void;
-  storageKey?: string; // localStorage key (defaults to aura:pageSize)
-  collapsed?: boolean; // keep API similar to ServerSelector
-  loading?: boolean;
+  storageKey?: string; // defaults to aura:pageSize
 }
 
-const DEFAULT_KEY = "aura:pageSize";
-const DEFAULT_OPTIONS = [20, 50, 100, 200];
+const DEFAULT = [20, 50, 100, 200];
 
 export default function PageSizeSelector({
-  options = DEFAULT_OPTIONS,
+  options = DEFAULT,
   value,
   onChange,
-  storageKey = DEFAULT_KEY,
-  collapsed = false,
-  loading = false,
-}: PageSizeSelectorProps) {
+  storageKey = "aura:pageSize",
+}: Props) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selected, setSelected] = useState<number | null>(value ?? null);
+  const [selected, setSelected] = useState<number>(value ?? options[0]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // restore from storage if provided, otherwise use prop value or first option
-    const saved = (() => {
-      try {
-        return localStorage.getItem(storageKey);
-      } catch {
-        return null;
-      }
-    })();
-
-    if (saved) {
-      const n = Number(saved);
-      if (!Number.isNaN(n) && options.includes(n)) {
-        setSelected(n);
-        onChange?.(n);
-        return;
-      }
-    }
-
-    if (value && options.includes(value)) {
-      setSelected(value);
-      return;
-    }
-
-    setSelected(options[0]);
-    onChange?.(options[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options, storageKey]);
-
-  useEffect(() => {
-    // keep controlled value in sync (if parent updates)
-    if (typeof value === "number" && value !== selected) setSelected(value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const handleSelect = (v: number) => {
-    setSelected(v);
+    // load from storage if present
     try {
-      localStorage.setItem(storageKey, String(v));
+      const s = localStorage.getItem(storageKey);
+      if (s) {
+        const n = Number(s);
+        if (!Number.isNaN(n) && options.includes(n)) {
+          setSelected(n);
+          onChange?.(n);
+        }
+      } else if (typeof value === "number") {
+        setSelected(value);
+      }
     } catch {
-      /* ignore storage errors */
+      // ignore storage access errors
     }
-    onChange?.(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof value === "number" && value !== selected) setSelected(value);
+  }, [value, selected]);
+
+  // click outside closes dropdown
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    if (isOpen) document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [isOpen]);
+
+  const handleSelect = (n: number) => {
+    setSelected(n);
+    try {
+      localStorage.setItem(storageKey, String(n));
+    } catch {
+      /* ignore */
+    }
+    onChange?.(n);
     setIsOpen(false);
   };
 
-  if (collapsed) {
-    return (
-      <Button variant="glass" size="icon" onClick={() => setIsOpen((s) => !s)}>
-        {loading ? null : (
-          <span className="text-sm font-bold">{selected ?? "—"}</span>
-        )}
-      </Button>
-    );
-  }
-
   return (
-    <div className="relative inline-block" onBlur={() => setIsOpen(false)}>
-      <Button
-        variant="glass"
-        className="w-full justify-between h-12 px-3"
-        onClick={() => setIsOpen((v) => !v)}
-        disabled={loading}
+    <div className="relative inline-block" ref={rootRef}>
+      {/* button: dark pill with big number */}
+      <button
+        className="flex items-center gap-3 h-11 px-3 rounded-md bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
+        onClick={() => setIsOpen((s) => !s)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        type="button"
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-            <span className="text-sm font-medium">{selected ?? "—"}</span>
-          </div>
-
-          <div className="min-w-0 text-left">
-            <p className="text-sm font-medium truncate max-w-[140px]">
-              {selected ?? "—"}
-            </p>
-            <p className="text-xs text-muted-foreground">items per page</p>
-          </div>
+        <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center">
+          <span className="text-sm font-semibold text-foreground">
+            {selected}
+          </span>
         </div>
 
-        <ChevronDown
-          className={cn("w-4 h-4 transition-transform", isOpen && "rotate-180")}
-        />
-      </Button>
+        {/* display small number text to right (matches screenshot) */}
+        <div className="text-sm font-medium text-foreground">{selected}</div>
+
+        <div className="ml-2">
+          <ChevronDown
+            className={`w-4 h-4 text-muted-foreground ${
+              isOpen ? "rotate-180" : ""
+            }`}
+          />
+        </div>
+      </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in">
+        <div
+          role="listbox"
+          aria-label="Page size"
+          className="absolute mt-2 w-36 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden animate-scale-in"
+        >
           <div className="p-2 space-y-2">
             {options.map((opt) => {
-              const isSelected = selected === opt;
+              const isSel = opt === selected;
               return (
                 <button
                   key={opt}
+                  type="button"
+                  role="option"
+                  aria-selected={isSel}
                   onClick={() => handleSelect(opt)}
-                  className={cn(
-                    "w-56 px-3 py-3 rounded-lg text-left flex items-center justify-between gap-2",
-                    isSelected
+                  className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-lg text-left ${
+                    isSel
                       ? "bg-primary/10 border border-primary/20"
                       : "hover:bg-secondary"
-                  )}
+                  }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
                       <span className="text-base font-semibold">{opt}</span>
                     </div>
-
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {opt} items
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Per page
+                    <div>
+                      <div className="text-sm font-medium text-foreground">
+                        {opt}
                       </div>
                     </div>
                   </div>
 
-                  {isSelected && <Check className="w-4 h-4 text-primary" />}
+                  {isSel ? <Check className="w-4 h-4 text-primary" /> : null}
                 </button>
               );
             })}
